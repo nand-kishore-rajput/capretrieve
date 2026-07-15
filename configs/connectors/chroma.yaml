@@ -1,0 +1,10 @@
+connector_id: chroma
+paradigm: dense_semantic
+freshness: index_time
+privacy_tier: private_local
+query_leaks_externally: false
+scope: >
+  Indexed document corpus in ChromaDB. Dense semantic similarity search
+  over a fixed, locally-ingested set of documents. Drives S5 (trivial
+  semantic baseline) — proves the planner doesn't over-select when a
+  single local source suffices.

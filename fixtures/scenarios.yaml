@@ -1,0 +1,122 @@
+# fixtures/scenarios.yaml
+#
+# Adversarial query scenarios — the ground-truth specification for what the
+# planner should do, not a benchmark. Each scenario isolates one capability
+# dimension and states the expected plan as must_include / must_exclude,
+# with a machine-checkable reason for every exclusion.
+#
+# connector_ids referenced here (obsidian, chroma, web_search) must match
+# configs/connectors/*.yaml exactly — that's what keeps this fixture file
+# and the manifest schema honest with each other.
+#
+# Every field in manifest/models.py must be justified by at least one
+# scenario below:
+#   - query_leaks_externally  -> S1
+#   - paradigm                -> S4, S5
+#   - freshness                -> S2
+#   - privacy_tier              -> S1
+#
+# S3 depends on latency/cost fields that are deferred to Phase 6 (see
+# "Latest Updated Project Scope and Phases" — full constraint layer).
+# It's recorded here as ground truth now so Phase 6 has a fixed target,
+# even though it can't pass until the budget fields exist on the manifest.
+
+scenarios:
+
+  - id: S1
+    name: privacy_hard_block
+    description: >
+      Query whose semantics point at web search, but which contains
+      private/sensitive terms. The web connector must be hard-blocked
+      regardless of how well it matches semantically, and the exclusion
+      reason must be reported in the trace.
+    query: "search the web for advice on my divorce settlement and custody arrangement"
+    must_include:
+      - obsidian
+      - chroma
+    must_exclude:
+      - connector_id: web_search
+        reason: "privacy_sensitivity=confidential and query_leaks_externally=true on web_search"
+    status: active
+    depends_on_manifest_fields:
+      - query_leaks_externally
+      - privacy_tier
+
+  - id: S2
+    name: freshness_gap
+    description: >
+      Query asks for a past conclusion plus whether anything has changed
+      since. Answerable only by composing a static/local source with a
+      live source — neither alone is sufficient.
+    query: "What did I conclude about switching to a standing desk, and has anything changed since?"
+    must_include:
+      - obsidian
+      - web_search
+    must_exclude: []
+    status: deferred
+    deferred_to_phase: 5
+    note: >
+      Requires sequential composition (expand / gap-fill), not just
+      parallel fan-out. Cannot pass until Phase 5 composition exists.
+    depends_on_manifest_fields:
+      - freshness
+
+  - id: S3
+    name: latency_cost_budget
+    description: >
+      Web search is the best-matching source by paradigm, but exceeds the
+      caller's declared latency/cost budget. Correct plan degrades to
+      local sources only and flags reduced confidence in the trace.
+    query: "quickly check if there's been any major news on this topic today"
+    constraints:
+      latency_budget_ms: 500
+    must_include:
+      - chroma
+    must_exclude:
+      - connector_id: web_search
+        reason: "typical_latency_ms exceeds declared latency_budget_ms"
+    status: deferred
+    deferred_to_phase: 6
+    note: >
+      Requires typical_latency_ms / cost_per_call on the manifest, which
+      were pruned from the Phase 1 schema. Reinstated as part of the full
+      constraint layer.
+    depends_on_manifest_fields:
+      - typical_latency_ms
+      - cost_per_call
+
+  - id: S4
+    name: relational_multi_hop
+    description: >
+      Query requires following note links (relational structure), not
+      semantic similarity. Only the graph-traversal-capable connector can
+      satisfy this correctly.
+    query: "What other notes link to my project retrospective, and what did those say?"
+    must_include:
+      - obsidian
+    must_exclude:
+      - connector_id: chroma
+        reason: "paradigm=dense_semantic cannot satisfy a relational/graph-traversal query"
+      - connector_id: web_search
+        reason: "query concerns private local notes; no public-web equivalent exists"
+    status: active
+    depends_on_manifest_fields:
+      - paradigm
+
+  - id: S5
+    name: trivial_semantic_baseline
+    description: >
+      Purely semantic recall over an indexed local corpus. Proves the
+      planner doesn't over-select when a single local source is
+      sufficient.
+    query: "Summarize what my notes say about intermittent fasting."
+    must_include:
+      - chroma
+    must_exclude:
+      - connector_id: obsidian
+        reason: "query is satisfied by semantic recall alone; no relational structure requested"
+      - connector_id: web_search
+        reason: "query expects_personal_knowledge=true; no reason to leave local sources"
+    status: active
+    depends_on_manifest_fields:
+      - paradigm
