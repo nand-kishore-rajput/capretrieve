@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from capretrieve.connectors.obsidian.connector import ObsidianConnector
+from capretrieve.connectors.obsidian.connector import ObsidianConnector, _resolve_seed_note
 from capretrieve.contracts.health import HealthState
 from capretrieve.contracts.request import RetrievalRequest
 from capretrieve.manifest.loader import load_manifest_file
@@ -104,3 +104,101 @@ async def test_retrieve_graph_traversal_unknown_seed_returns_empty(
         )
     )
     assert result.evidence == []
+
+
+@pytest.mark.asyncio
+async def test_retrieve_graph_traversal_matches_seed_case_insensitively(
+    connector: ObsidianConnector,
+):
+    """Regression test: an LLM-extracted seed_entity won't match the
+    vault's exact note-name casing (e.g. "project retrospective" vs.
+    "Project Retrospective"). This must still trigger graph traversal,
+    not silently fall through to keyword search over the whole vault."""
+    result = await connector.retrieve(
+        RetrievalRequest(
+            query="ignored in traversal mode",
+            top_k=10,
+            filters={"seed_note": "project retrospective", "depth": 1},
+        )
+    )
+    uris = {Path(ev.uri).stem for ev in result.evidence}
+    assert uris == {"Project Retrospective", "Sprint Planning", "Standing Desk"}
+
+
+@pytest.mark.asyncio
+async def test_retrieve_graph_traversal_matches_seed_with_extra_words(
+    connector: ObsidianConnector,
+):
+    """An LLM might extract a slightly padded phrase (e.g. including "my")
+    rather than the bare note title — substring matching should still
+    resolve it correctly."""
+    result = await connector.retrieve(
+        RetrievalRequest(
+            query="ignored in traversal mode",
+            top_k=10,
+            filters={"seed_note": "my project retrospective", "depth": 1},
+        )
+    )
+    uris = {Path(ev.uri).stem for ev in result.evidence}
+    assert "Project Retrospective" in uris
+
+
+@pytest.mark.asyncio
+async def test_retrieve_graph_traversal_does_not_return_all_vault_notes(
+    connector: ObsidianConnector,
+):
+    """The exact real-world regression: graph traversal from a seed with
+    only 3 connected notes must NOT return all 4 notes in the vault (that
+    would mean it silently fell back to keyword search)."""
+    result = await connector.retrieve(
+        RetrievalRequest(
+            query="ignored in traversal mode",
+            top_k=10,
+            filters={"seed_note": "project retrospective", "depth": 1},
+        )
+    )
+    uris = {Path(ev.uri).stem for ev in result.evidence}
+    assert "Intermittent Fasting" not in uris
+    assert len(uris) == 3
+
+
+class TestResolveSeedNote:
+    """Direct tests for the _resolve_seed_note helper, isolated from the
+    full retrieve() flow."""
+
+    def test_exact_match(self):
+        notes = {"Project Retrospective": object()}
+        assert _resolve_seed_note(notes, "Project Retrospective") == "Project Retrospective"
+
+    def test_case_insensitive_match(self):
+        notes = {"Project Retrospective": object()}
+        assert _resolve_seed_note(notes, "project retrospective") == "Project Retrospective"
+
+    def test_substring_match_seed_contains_note_name(self):
+        notes = {"Project Retrospective": object()}
+        assert _resolve_seed_note(notes, "my project retrospective") == "Project Retrospective"
+
+    def test_substring_match_note_name_contains_seed(self):
+        notes = {"Q3 Planning Doc": object()}
+        assert _resolve_seed_note(notes, "planning") == "Q3 Planning Doc"
+
+    def test_no_match_returns_none(self):
+        notes = {"Project Retrospective": object()}
+        assert _resolve_seed_note(notes, "completely unrelated phrase xyz") is None
+
+    def test_prefers_longest_candidate_when_multiple_match(self):
+        """Fixture deliberately avoids any note that's an EXACT match to
+        the seed — "plan" is a substring of both note names below, but
+        neither equals "plan" exactly, so this genuinely exercises the
+        longest-candidate tie-break rather than short-circuiting on the
+        earlier exact-match check."""
+        notes = {"Plan A": object(), "Plan A Details": object()}
+        assert _resolve_seed_note(notes, "plan") == "Plan A Details"
+
+    def test_exact_match_wins_over_a_longer_substring_candidate(self):
+        """An exact (case-insensitive) match should win even when a
+        different, longer note name would also match as a substring —
+        exact identity is a stronger signal than partial overlap with a
+        differently-named note, regardless of which is longer."""
+        notes = {"Planning": object(), "Q3 Planning Doc": object()}
+        assert _resolve_seed_note(notes, "planning") == "Planning"

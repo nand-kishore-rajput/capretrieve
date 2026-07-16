@@ -181,6 +181,60 @@ async def test_relational_query_selects_only_obsidian(wired_registry):
     assert all(ev.source_id == "obsidian" for ev in result["raw_evidence"])
 
 
+async def test_relational_query_with_seed_entity_actually_uses_graph_traversal(
+    wired_registry,
+):
+    """Regression test: selecting the obsidian connector for a relational
+    query is NOT enough to prove graph traversal actually ran — an
+    earlier real end-to-end test (against the live OpenRouter API) showed
+    the connector silently falling back to keyword search across the
+    entire vault, because nothing in the pipeline populated
+    QueryRequirements.seed_entity even though the connector was selected
+    correctly. Keyword search over this fixture vault happened to still
+    produce a right-sounding answer (via the synthesis LLM's own reading
+    comprehension), which is exactly why this needs its own explicit
+    check rather than relying on eyeballing a synthesized answer.
+
+    This test asserts on the EVIDENCE SHAPE, which is what distinguishes
+    the two retrieval modes structurally:
+      - graph traversal returns exactly the seed note + its direct
+        wikilink/backlink neighbours, each scored 1.0 (see
+        ObsidianConnector.retrieve's seed_note branch)
+      - keyword search returns whatever the query's terms happen to
+        match, scored by hit count, typically across more of the vault
+    """
+    analyzer_client = FakeLLMClient(
+        _requirements_json(
+            paradigm_hint="graph_traversal",
+            relational=True,
+            expects_personal_knowledge=True,
+            seed_entity="project retrospective",
+        )
+    )
+    synthesis_client = FakeLLMClient("Sprint Planning and Standing Desk link to it [1][2].")
+
+    graph = build_graph(wired_registry, analyzer_client, synthesis_client)
+    result = await graph.ainvoke(
+        {
+            "query": "What other notes link to my project retrospective?",
+            "top_k": 5,
+        }
+    )
+
+    evidence_uris = {Path(ev.uri).stem for ev in result["raw_evidence"]}
+
+    # exactly the seed + its two direct links (per the real fixture
+    # vault's wikilink graph) — NOT Intermittent Fasting, which is
+    # isolated and would only show up under keyword search
+    assert evidence_uris == {"Project Retrospective", "Sprint Planning", "Standing Desk"}
+    assert "Intermittent Fasting" not in evidence_uris
+
+    # graph traversal scores every result 1.0 uniformly; a varied score
+    # distribution (as keyword search produces) would indicate the
+    # seed_entity filter never reached the connector
+    assert all(ev.score == 1.0 for ev in result["raw_evidence"])
+
+
 async def test_empty_plan_skips_retrieval_and_still_synthesizes(wired_registry):
     """If the planner selects nothing, the graph should still complete
     (fuse over empty evidence, synthesize an honest 'no evidence' answer)

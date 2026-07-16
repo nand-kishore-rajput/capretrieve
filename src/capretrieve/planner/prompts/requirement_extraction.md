@@ -46,6 +46,14 @@ Extract the following fields:
   asker's own notes, past conclusions, decisions, or history (e.g. "what
   did I decide", "my notes on X") rather than general public knowledge.
 
+- **seed_entity**: if the query names a specific item to trace
+  relationships FROM (e.g. "what links to my project retrospective" ->
+  "project retrospective"; "what connects to the Q3 planning doc" -> "Q3
+  planning doc"), extract just that item's name as plain text, using
+  the wording the query itself uses. Use null if the query doesn't name
+  a specific starting item, or isn't asking about relationships at all.
+  Do not guess a name that isn't actually present in the query text.
+
 Respond with ONLY a JSON object matching this exact shape, no other text:
 
 ```json
@@ -54,7 +62,8 @@ Respond with ONLY a JSON object matching this exact shape, no other text:
   "relational": true | false,
   "needs_freshness": "any" | "recent" | "live",
   "privacy_sensitivity": "none" | "personal" | "confidential",
-  "expects_personal_knowledge": true | false
+  "expects_personal_knowledge": true | false,
+  "seed_entity": string | null
 }
 ```
 

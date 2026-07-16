@@ -13,6 +13,14 @@ supports two retrieval modes:
 Which mode fires is a filter on the request, not a separate connector —
 the planner never needs to know this connector has two internal
 strategies; it only ever sees one paradigm value in the manifest.
+
+The seed_note filter value originates from QueryRequirements.seed_entity,
+extracted by an LLM purely from the query's own text — it has no way to
+know a vault's exact note-name casing or exact wording (e.g. "project
+retrospective" vs. the actual note "Project Retrospective"). retrieve()
+therefore resolves seed_note against actual note names case-insensitively,
+falling back to a substring match, rather than requiring an exact key
+match into the notes dict.
 """
 
 from __future__ import annotations
@@ -26,6 +34,38 @@ from capretrieve.contracts.health import HealthState, HealthStatus
 from capretrieve.contracts.request import RetrievalRequest
 from capretrieve.contracts.result import Evidence, RetrievalResult
 from capretrieve.manifest.models import CapabilityManifest
+
+
+def _resolve_seed_note(notes: dict[str, Note], seed: str) -> str | None:
+    """
+    Resolve a possibly-imprecise seed phrase to an actual note_name key.
+
+    Tries, in order: exact match, case-insensitive exact match, then a
+    substring match in either direction (handles "project retrospective"
+    matching "Project Retrospective", or a seed with extra words like "my
+    project retrospective" still finding "Project Retrospective"). Returns
+    None if nothing plausible is found — the caller treats that as "no
+    matching seed", same as an unresolvable seed always has.
+    """
+    if seed in notes:
+        return seed
+
+    seed_lower = seed.strip().lower()
+    for note_name in notes:
+        if note_name.lower() == seed_lower:
+            return note_name
+
+    candidates = [
+        note_name
+        for note_name in notes
+        if note_name.lower() in seed_lower or seed_lower in note_name.lower()
+    ]
+    if not candidates:
+        return None
+    # Prefer the longest matching note_name — the most specific match
+    # when multiple note names could be substrings of a loosely-phrased
+    # seed (or vice versa).
+    return max(candidates, key=len)
 
 
 class ObsidianConnector:
@@ -56,7 +96,12 @@ class ObsidianConnector:
 
         if seed_note:
             depth = int(filters.get("depth", 1))
-            matched_notes = expand_neighbourhood(notes, seed_note, depth=depth)
+            resolved_seed = _resolve_seed_note(notes, seed_note)
+            matched_notes = (
+                expand_neighbourhood(notes, resolved_seed, depth=depth)
+                if resolved_seed is not None
+                else []
+            )
             scored = [(note, 1.0) for note in matched_notes]
         else:
             scored = self._keyword_search(notes, req.query)

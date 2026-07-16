@@ -40,8 +40,15 @@ class GraphState(TypedDict, total=False):
 class RetrieveOneInput(TypedDict):
     """The per-branch state sent to retrieve_one via Send — deliberately
     smaller than the full GraphState, since each parallel branch only
-    needs to know which connector to query and with what request."""
+    needs to know which connector to query and with what request.
+
+    filters is optional structured guidance derived from QueryRequirements
+    (e.g. {"seed_note": ..., "depth": ...} for a relational query with a
+    seed_entity) — passed through to RetrievalRequest.filters verbatim.
+    Connectors that don't understand a given filter key simply ignore it
+    (see contracts/request.py)."""
 
     connector_id: str
     query: str
     top_k: int
+    filters: dict | None

@@ -72,3 +72,18 @@ class QueryRequirements(BaseModel):
     expects_personal_knowledge: bool = False
     """True if the query is about the person's own notes/history (e.g.
     "what did I conclude...") rather than general public knowledge."""
+
+    seed_entity: str | None = None
+    """The specific named entity the query wants to traverse relationships
+    from — e.g. for "what other notes link to my project retrospective",
+    this would be "project retrospective". Only meaningful when
+    relational=True; None if the query doesn't name a specific starting
+    point, or isn't relational at all.
+
+    This is extracted purely from the query's own text (an ordinary
+    entity-extraction task), not from any knowledge of what sources or
+    connectors exist — it doesn't compromise the analyzer isolation
+    invariant. A connector that supports seeded traversal (e.g. Obsidian)
+    is expected to match this against its own item names case-insensitively,
+    since the analyzer has no way to know the exact casing used in any
+    particular vault/corpus."""
