@@ -4,5 +4,7 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace
+    ports:
+      - "18000:8000"
     stdin_open: true
     tty: true
