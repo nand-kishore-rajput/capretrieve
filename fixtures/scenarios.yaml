@@ -22,7 +22,6 @@
 # even though it can't pass until the budget fields exist on the manifest.
 
 scenarios:
-
   - id: S1
     name: privacy_hard_block
     description: >
@@ -98,7 +97,7 @@ scenarios:
       - connector_id: chroma
         reason: "paradigm=dense_semantic cannot satisfy a relational/graph-traversal query"
       - connector_id: web_search
-        reason: "query concerns private local notes; no public-web equivalent exists"
+        reason: "paradigm=keyword cannot satisfy a relational/graph-traversal query"
     status: active
     depends_on_manifest_fields:
       - paradigm
