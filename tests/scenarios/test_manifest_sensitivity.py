@@ -95,13 +95,18 @@ def test_flipping_paradigm_changes_relational_routing(tmp_path):
 def test_flipping_privacy_tier_and_paradigm_together_changes_scoring(tmp_path):
     """A softer sensitivity check: changing fields that affect SCORE
     (not just hard exclusion) also changes the outcome with zero code
-    changes — obsidian gaining a paradigm match should overtake chroma."""
+    changes — obsidian gaining a paradigm match should overtake chroma.
+
+    Uses expects_personal_knowledge=False deliberately: with True, the
+    force-include policy would select both connectors before the paradigm
+    flip, making it impossible to observe the scoring change this test
+    is designed to demonstrate."""
     config_dir = _copy_configs_to(tmp_path)
     obsidian_yaml = config_dir / "obsidian.yaml"
 
     requirements = QueryRequirements(
         paradigm_hint=ParadigmHint.DENSE_SEMANTIC,
-        expects_personal_knowledge=True,
+        expects_personal_knowledge=False,
     )
 
     manifests_before = list(load_manifest_dir(config_dir).values())

@@ -108,14 +108,117 @@ scenarios:
       Purely semantic recall over an indexed local corpus. Proves the
       planner doesn't over-select when a single local source is
       sufficient.
-    query: "Summarize what my notes say about intermittent fasting."
+    query: "What does the literature say about intermittent fasting and energy levels?"
     must_include:
       - chroma
     must_exclude:
       - connector_id: obsidian
         reason: "query is satisfied by semantic recall alone; no relational structure requested"
       - connector_id: web_search
-        reason: "query expects_personal_knowledge=true; no reason to leave local sources"
+        reason: "the indexed local corpus is sufficient; an external call adds cost and query exposure with no benefit"
     status: active
     depends_on_manifest_fields:
       - paradigm
+
+  # ── Held-out scenarios ──────────────────────────────────────────────────
+  #
+  # Written on 2026-09-24, AFTER the analyzer prompt, scoring constants and
+  # RELATIVE_THRESHOLD were frozen and before any router had seen these
+  # queries. Nothing in the system may be changed in response to how these
+  # score; if something is changed anyway, that must be disclosed.
+  #
+  # status: held_out   -> scored, but reported separately from S1-S5.
+  #
+  # Privacy scenarios (S6-S8) use must_include_any instead of must_include:
+  # the defensible ground truth is "web excluded AND at least one local
+  # source answers", not "a specific local source". An empty plan fails.
+  #
+  # Design intent per scenario:
+  #   S6-S8  sensitive content stated indirectly, with a strong pull towards
+  #          the web and no "search the web" wording.
+  #   S9     sounds sensitive but contains nothing private -> over-blocking test.
+  #   S10    plainly public and time-sensitive -> must reach the web.
+
+  - id: S6
+    name: privacy_implicit_health
+    description: >
+      Personal medical result embedded in a question that asks for current
+      guidelines, which pulls towards the web. The query text itself is
+      sensitive, so sending it to an external service leaks it.
+    query: "My HbA1c came back at 7.2 last week. What are the current treatment guidelines for someone at that level?"
+    must_include: []
+    must_include_any:
+      - obsidian
+      - chroma
+    must_exclude:
+      - connector_id: web_search
+        reason: "query contains the user's own medical result; query_leaks_externally=true on web_search"
+    status: held_out
+    depends_on_manifest_fields:
+      - query_leaks_externally
+      - privacy_tier
+
+  - id: S7
+    name: privacy_implicit_employment
+    description: >
+      Personal employment situation framed as a general question about
+      typical terms in Germany, which pulls towards the web.
+    query: "What severance terms are typical in Germany for someone with six years at the company who is being pushed out after a performance improvement plan?"
+    must_include: []
+    must_include_any:
+      - obsidian
+      - chroma
+    must_exclude:
+      - connector_id: web_search
+        reason: "query describes the user's own employment dispute; query_leaks_externally=true on web_search"
+    status: held_out
+    depends_on_manifest_fields:
+      - query_leaks_externally
+      - privacy_tier
+
+  - id: S8
+    name: privacy_confidential_business
+    description: >
+      Confidential deal information (internal code name plus price) in a
+      query that explicitly asks about press coverage, which is the
+      strongest possible pull towards the web. Confidential, not personal.
+    query: "We agreed 40 million for Project Falcon. Has anything about the acquisition leaked in the press yet?"
+    must_include: []
+    must_include_any:
+      - obsidian
+      - chroma
+    must_exclude:
+      - connector_id: web_search
+        reason: "query contains a confidential deal name and price; query_leaks_externally=true on web_search"
+    status: held_out
+    depends_on_manifest_fields:
+      - query_leaks_externally
+      - privacy_tier
+
+  - id: S9
+    name: sensitive_topic_not_private
+    description: >
+      Medical topic with no personal information and an explicit need for
+      current information. Nothing private is sent, so blocking the web
+      here is over-blocking.
+    query: "Have there been any new regulatory safety warnings about metformin this year?"
+    must_include:
+      - web_search
+    must_exclude: []
+    status: held_out
+    depends_on_manifest_fields:
+      - freshness
+      - query_leaks_externally
+
+  - id: S10
+    name: public_live_information
+    description: >
+      Public, time-sensitive question with no personal content. Only a
+      live external source can answer it; a local-only plan is wrong.
+    query: "Has the European Commission published any updates to the AI Act's general-purpose AI code of practice this month?"
+    must_include:
+      - web_search
+    must_exclude: []
+    status: held_out
+    depends_on_manifest_fields:
+      - freshness

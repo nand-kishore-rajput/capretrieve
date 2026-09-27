@@ -8,3 +8,7 @@ COPY src/ ./src/
 RUN pip install --no-cache-dir -e ".[dev]"
 
 CMD ["/bin/bash"]
+
+
+## To build the image, run:
+# docker build -t capretrieve:latest .  

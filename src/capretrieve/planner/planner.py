@@ -6,9 +6,9 @@ Deliberately takes a list of CapabilityManifest, not a list of Connector
 or a Registry. This is what keeps the architectural invariant "the
 planner never imports connectors or registry" mechanically true rather
 than just documented — plan() has no way to reach a connector even if
-someone tried, because it never receives one. The caller (a future
-graph/nodes/plan.py) is responsible for fetching manifests from the
-registry and handing only the manifests to this function.
+someone tried, because it never receives one. The caller (graph/nodes/
+plan.py) is responsible for fetching manifests from the registry and
+handing only the manifests to this function.
 """
 
 from __future__ import annotations
@@ -31,7 +31,8 @@ def plan(
 
     Every manifest gets exactly one SelectionDecision: hard-excluded (with
     a reason) or admitted (with a soft score). select() then turns that
-    into the final chosen set.
+    into the final chosen set, using both the relative threshold and the
+    personal-knowledge force-include policy.
     """
     decisions: list[SelectionDecision] = []
 
@@ -56,4 +57,7 @@ def plan(
             )
         )
 
-    return select(decisions)
+    # Pass manifests as a dict so select() can check privacy_tier for the
+    # personal-knowledge force-include policy without importing connectors.
+    manifests_by_id = {m.connector_id: m for m in manifests}
+    return select(decisions, requirements=requirements, manifests=manifests_by_id)

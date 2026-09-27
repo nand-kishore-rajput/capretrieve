@@ -64,3 +64,35 @@ def build_graph(
     builder.add_edge(SYNTHESIZE, END)
 
     return builder.compile()
+
+
+def build_trace_graph(
+    registry: Registry,
+    analyzer_client: CompletesText,
+    default_top_k: int = 5,
+    max_fused_items: int | None = None,
+) -> CompiledStateGraph:
+    """
+    Like build_graph but stops after fuse — no synthesis step, no second
+    OpenRouter call. Used by the /trace endpoint to inspect routing
+    decisions cheaply: only the analyzer LLM call runs, retrieval is real,
+    but synthesis is skipped entirely.
+    """
+    builder = StateGraph(GraphState)
+
+    builder.add_node(ANALYZE, make_analyze_node(analyzer_client))
+    builder.add_node(PLAN, make_plan_node(registry))
+    builder.add_node(RETRIEVE_ONE_NODE_NAME, make_retrieve_one_node(registry))
+    builder.add_node(FUSE, make_fuse_node(max_items=max_fused_items))
+
+    builder.add_edge(START, ANALYZE)
+    builder.add_edge(ANALYZE, PLAN)
+    builder.add_conditional_edges(
+        PLAN,
+        make_fan_out_router(default_top_k=default_top_k),
+        [RETRIEVE_ONE_NODE_NAME, FUSE],
+    )
+    builder.add_edge(RETRIEVE_ONE_NODE_NAME, FUSE)
+    builder.add_edge(FUSE, END)
+
+    return builder.compile()

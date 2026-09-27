@@ -25,6 +25,7 @@ import chromadb
 import pytest
 
 from capretrieve.connectors.chroma.connector import ChromaConnector
+from capretrieve.connectors.chroma.embeddings import HashingEmbeddingFunction
 from capretrieve.connectors.chroma.ingest import ingest_corpus
 from capretrieve.connectors.obsidian.connector import ObsidianConnector
 from capretrieve.connectors.web.connector import WebSearchConnector
@@ -42,9 +43,9 @@ CORPUS_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "corpus"
 # so "returns Evidence for a smoke query" is a meaningful assertion rather
 # than trivially true on an empty result.
 SMOKE_QUERIES = {
-    "obsidian": "intermittent fasting",
-    "chroma": "standing desk ergonomics",
-    "web_search": "standing desk back pain research",
+    "obsidian": "RAG systems retrieval",
+    "chroma": "transformer attention mechanism",
+    "web_search": "RAG hallucination reduction",
 }
 
 
@@ -60,9 +61,12 @@ def wired_registry():
     chroma_client = chromadb.EphemeralClient(
         settings=chromadb.config.Settings(anonymized_telemetry=False)
     )
-    ingest_corpus(CORPUS_DIR, client=chroma_client, collection_name="conformance_test")
+    ef = HashingEmbeddingFunction()
+    ingest_corpus(CORPUS_DIR, client=chroma_client, collection_name="conformance_test",
+                  embedding_function=ef)
     chroma = ChromaConnector(
-        manifest=manifests["chroma"], client=chroma_client, collection_name="conformance_test"
+        manifest=manifests["chroma"], client=chroma_client,
+        collection_name="conformance_test", embedding_function=ef
     )
 
     fake_tavily = FakeTavilyClient(response=SAMPLE_TAVILY_RESPONSE)

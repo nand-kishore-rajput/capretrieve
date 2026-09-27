@@ -17,7 +17,8 @@ from fastapi import FastAPI
 from capretrieve.api.routes import connectors as connectors_route
 from capretrieve.api.routes import health as health_route
 from capretrieve.api.routes import query as query_route
-from capretrieve.graph.build import build_graph
+from capretrieve.api.routes import trace as trace_route
+from capretrieve.graph.build import build_graph, build_trace_graph
 from capretrieve.llm.structured import CompletesText
 from capretrieve.registry.static import Registry
 
@@ -34,9 +35,13 @@ def create_app(
     app.state.graph = build_graph(
         registry, analyzer_client, synthesis_client, default_top_k=default_top_k
     )
+    app.state.trace_graph = build_trace_graph(
+        registry, analyzer_client, default_top_k=default_top_k
+    )
 
     app.include_router(query_route.router)
     app.include_router(connectors_route.router)
     app.include_router(health_route.router)
+    app.include_router(trace_route.router)
 
     return app

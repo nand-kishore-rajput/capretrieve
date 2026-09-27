@@ -4,7 +4,6 @@ freshness: live
 privacy_tier: private_local
 query_leaks_externally: false
 scope: >
-  Personal Obsidian vault: frontmatter, [[wikilinks]], and tags. Supports
-  keyword/tag lookup and link-neighbourhood expansion from a seed note.
-  Mandatory source; drives S4 (relational/multi-hop) via graph_traversal
-  and S1 (privacy hard-block) as the local alternative to web search.
+  The user's personal Obsidian notes vault. Looks up notes by keyword or tag,
+  and follows [[wikilinks]] to find notes linked to or from a given note.
+  Runs locally.

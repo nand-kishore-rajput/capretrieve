@@ -4,8 +4,5 @@ freshness: live
 privacy_tier: public_external
 query_leaks_externally: true
 scope: >
-  Live web search via an external search API (Tavily/Brave/SerpAPI).
-  Keyword-based, always current, but the raw query text leaves the local
-  environment. Drives S1 (privacy hard-block): any query with personal or
-  confidential content must be excluded from this connector regardless of
-  how well it matches semantically.
+  Live web search through an external search API. Returns current results
+  from the public internet. The query text is sent to a third-party service.

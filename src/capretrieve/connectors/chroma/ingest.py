@@ -30,7 +30,7 @@ from pathlib import Path
 import chromadb
 from chromadb.api.types import EmbeddingFunction
 
-from capretrieve.connectors.chroma.embeddings import HashingEmbeddingFunction
+from capretrieve.connectors.chroma.embeddings import get_embedding_function
 
 DEFAULT_COLLECTION_NAME = "capretrieve_corpus"
 
@@ -71,7 +71,7 @@ def ingest_corpus(
             raise ValueError("ingest_corpus requires either persist_dir or client")
         client = _default_client(persist_dir)
 
-    ef = embedding_function if embedding_function is not None else HashingEmbeddingFunction()
+    ef = embedding_function if embedding_function is not None else get_embedding_function()
     collection = client.get_or_create_collection(collection_name, embedding_function=ef)
 
     ids = [p.stem for p in paths]

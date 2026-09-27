@@ -62,7 +62,7 @@ SCENARIO_REQUIREMENTS = {
         relational=False,
         needs_freshness=Freshness.ANY,
         privacy_sensitivity=PrivacySensitivity.NONE,
-        expects_personal_knowledge=True,
+        expects_personal_knowledge=False,
     ),
 }
 

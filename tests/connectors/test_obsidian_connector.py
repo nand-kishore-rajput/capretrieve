@@ -1,6 +1,9 @@
 """
 Tests for connectors/obsidian/connector.py — the Connector protocol
 implementation wrapping vault.py + traversal.py.
+
+Retrieval tests run against `sample_vault` (tests/connectors/conftest.py);
+health is also checked against the real fixture vault.
 """
 
 from __future__ import annotations
@@ -14,14 +17,24 @@ from capretrieve.contracts.health import HealthState
 from capretrieve.contracts.request import RetrievalRequest
 from capretrieve.manifest.loader import load_manifest_file
 
-VAULT_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "vault"
+FIXTURE_VAULT_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "vault"
 MANIFEST_PATH = Path(__file__).parents[2] / "configs" / "connectors" / "obsidian.yaml"
+
+RETRO_NEIGHBOURHOOD = {"Project Retrospective", "Sprint Planning", "Standing Desk"}
 
 
 @pytest.fixture
-def connector() -> ObsidianConnector:
+def connector(sample_vault: Path) -> ObsidianConnector:
     manifest = load_manifest_file(MANIFEST_PATH)
-    return ObsidianConnector(manifest=manifest, vault_dir=VAULT_DIR)
+    return ObsidianConnector(manifest=manifest, vault_dir=sample_vault)
+
+
+def _traversal_request(seed: str, depth: int = 1) -> RetrievalRequest:
+    return RetrievalRequest(
+        query="ignored in traversal mode",
+        top_k=10,
+        filters={"seed_note": seed, "depth": depth},
+    )
 
 
 def test_manifest_matches_loaded_yaml(connector: ObsidianConnector):
@@ -31,8 +44,16 @@ def test_manifest_matches_loaded_yaml(connector: ObsidianConnector):
 
 
 @pytest.mark.asyncio
-async def test_health_ok_for_real_vault(connector: ObsidianConnector):
+async def test_health_ok_for_sample_vault(connector: ObsidianConnector):
     health = await connector.health()
+    assert health.state == HealthState.OK
+
+
+@pytest.mark.asyncio
+async def test_health_ok_for_fixture_vault():
+    manifest = load_manifest_file(MANIFEST_PATH)
+    real = ObsidianConnector(manifest=manifest, vault_dir=FIXTURE_VAULT_DIR)
+    health = await real.health()
     assert health.state == HealthState.OK
 
 
@@ -80,15 +101,9 @@ async def test_retrieve_keyword_search_no_match_returns_empty(connector: Obsidia
 
 @pytest.mark.asyncio
 async def test_retrieve_graph_traversal_via_seed_filter(connector: ObsidianConnector):
-    result = await connector.retrieve(
-        RetrievalRequest(
-            query="ignored in traversal mode",
-            top_k=10,
-            filters={"seed_note": "Project Retrospective", "depth": 1},
-        )
-    )
+    result = await connector.retrieve(_traversal_request("Project Retrospective"))
     uris = {Path(ev.uri).stem for ev in result.evidence}
-    assert uris == {"Project Retrospective", "Sprint Planning", "Standing Desk"}
+    assert uris == RETRO_NEIGHBOURHOOD
     assert all(ev.source_id == "obsidian" for ev in result.evidence)
 
 
@@ -97,11 +112,7 @@ async def test_retrieve_graph_traversal_unknown_seed_returns_empty(
     connector: ObsidianConnector,
 ):
     result = await connector.retrieve(
-        RetrievalRequest(
-            query="ignored",
-            top_k=10,
-            filters={"seed_note": "Does Not Exist"},
-        )
+        RetrievalRequest(query="ignored", top_k=10, filters={"seed_note": "Does Not Exist"})
     )
     assert result.evidence == []
 
@@ -114,15 +125,9 @@ async def test_retrieve_graph_traversal_matches_seed_case_insensitively(
     vault's exact note-name casing (e.g. "project retrospective" vs.
     "Project Retrospective"). This must still trigger graph traversal,
     not silently fall through to keyword search over the whole vault."""
-    result = await connector.retrieve(
-        RetrievalRequest(
-            query="ignored in traversal mode",
-            top_k=10,
-            filters={"seed_note": "project retrospective", "depth": 1},
-        )
-    )
+    result = await connector.retrieve(_traversal_request("project retrospective"))
     uris = {Path(ev.uri).stem for ev in result.evidence}
-    assert uris == {"Project Retrospective", "Sprint Planning", "Standing Desk"}
+    assert uris == RETRO_NEIGHBOURHOOD
 
 
 @pytest.mark.asyncio
@@ -132,13 +137,7 @@ async def test_retrieve_graph_traversal_matches_seed_with_extra_words(
     """An LLM might extract a slightly padded phrase (e.g. including "my")
     rather than the bare note title — substring matching should still
     resolve it correctly."""
-    result = await connector.retrieve(
-        RetrievalRequest(
-            query="ignored in traversal mode",
-            top_k=10,
-            filters={"seed_note": "my project retrospective", "depth": 1},
-        )
-    )
+    result = await connector.retrieve(_traversal_request("my project retrospective"))
     uris = {Path(ev.uri).stem for ev in result.evidence}
     assert "Project Retrospective" in uris
 
@@ -150,16 +149,11 @@ async def test_retrieve_graph_traversal_does_not_return_all_vault_notes(
     """The exact real-world regression: graph traversal from a seed with
     only 3 connected notes must NOT return all 4 notes in the vault (that
     would mean it silently fell back to keyword search)."""
-    result = await connector.retrieve(
-        RetrievalRequest(
-            query="ignored in traversal mode",
-            top_k=10,
-            filters={"seed_note": "project retrospective", "depth": 1},
-        )
-    )
+    result = await connector.retrieve(_traversal_request("project retrospective"))
     uris = {Path(ev.uri).stem for ev in result.evidence}
     assert "Intermittent Fasting" not in uris
     assert len(uris) == 3
+    assert all(ev.score == 1.0 for ev in result.evidence)
 
 
 class TestResolveSeedNote:

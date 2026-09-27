@@ -26,7 +26,7 @@ from pathlib import Path
 import chromadb
 from chromadb.api.types import EmbeddingFunction
 
-from capretrieve.connectors.chroma.embeddings import HashingEmbeddingFunction
+from capretrieve.connectors.chroma.embeddings import get_embedding_function
 from capretrieve.connectors.chroma.ingest import DEFAULT_COLLECTION_NAME
 from capretrieve.contracts.health import HealthState, HealthStatus
 from capretrieve.contracts.request import RetrievalRequest
@@ -59,7 +59,7 @@ class ChromaConnector:
         self._persist_dir = persist_dir
         self._collection_name = collection_name
         self._embedding_function = (
-            embedding_function if embedding_function is not None else HashingEmbeddingFunction()
+            embedding_function if embedding_function is not None else get_embedding_function()
         )
         self._client: chromadb.ClientAPI | None = client
 

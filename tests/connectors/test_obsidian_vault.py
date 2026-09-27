@@ -2,10 +2,15 @@
 Tests for connectors/obsidian/vault.py: frontmatter parsing, tag
 extraction (both frontmatter and inline #tags), and that ObsidianReader's
 wikilink/backlink metadata survives into our Note model.
+
+load_vault behaviour is tested against `sample_vault` (tests/connectors/
+conftest.py) so assertions are exact and independent of the demo vault in
+fixtures/data/vault. One smoke test still loads the real fixture vault.
 """
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 import pytest
@@ -17,7 +22,7 @@ from capretrieve.connectors.obsidian.vault import (
     load_vault,
 )
 
-VAULT_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "vault"
+FIXTURE_VAULT_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "vault"
 
 
 # ---- unit-level parsing helpers -------------------------------------------
@@ -26,7 +31,7 @@ VAULT_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "vault"
 def test_parse_frontmatter_extracts_dict_and_body():
     raw = "---\ntags: [a, b]\ndate: 2025-01-01\n---\n\n# Title\nbody text\n"
     fm, body = _parse_frontmatter(raw)
-    assert fm == {"tags": ["a", "b"], "date": __import__("datetime").date(2025, 1, 1)}
+    assert fm == {"tags": ["a", "b"], "date": datetime.date(2025, 1, 1)}
     assert "body text" in body
     assert "---" not in body
 
@@ -80,11 +85,11 @@ def test_normalize_frontmatter_tags(raw, expected):
     assert _normalize_frontmatter_tags(raw) == expected
 
 
-# ---- load_vault against the real fixture vault -----------------------------
+# ---- load_vault against the sample vault -----------------------------------
 
 
-def test_load_vault_finds_all_fixture_notes():
-    notes = load_vault(VAULT_DIR)
+def test_load_vault_finds_all_sample_notes(sample_vault: Path):
+    notes = load_vault(sample_vault)
     assert set(notes.keys()) == {
         "Project Retrospective",
         "Sprint Planning",
@@ -93,14 +98,14 @@ def test_load_vault_finds_all_fixture_notes():
     }
 
 
-def test_load_vault_parses_frontmatter_tags():
-    notes = load_vault(VAULT_DIR)
+def test_load_vault_parses_frontmatter_tags(sample_vault: Path):
+    notes = load_vault(sample_vault)
     assert "work" in notes["Project Retrospective"].tags
     assert "retrospective" in notes["Project Retrospective"].tags
 
 
-def test_load_vault_merges_inline_and_frontmatter_tags():
-    notes = load_vault(VAULT_DIR)
+def test_load_vault_merges_inline_and_frontmatter_tags(sample_vault: Path):
+    notes = load_vault(sample_vault)
     standing_desk = notes["Standing Desk"]
     # frontmatter declares health+equipment; body also has an inline #health
     assert "health" in standing_desk.tags
@@ -109,8 +114,8 @@ def test_load_vault_merges_inline_and_frontmatter_tags():
     assert standing_desk.tags.count("health") == 1
 
 
-def test_load_vault_wikilinks_and_backlinks():
-    notes = load_vault(VAULT_DIR)
+def test_load_vault_wikilinks_and_backlinks(sample_vault: Path):
+    notes = load_vault(sample_vault)
     retro = notes["Project Retrospective"]
     assert set(retro.wikilinks) == {"Standing Desk", "Sprint Planning"}
     assert "Sprint Planning" in retro.backlinks
@@ -120,9 +125,19 @@ def test_load_vault_wikilinks_and_backlinks():
     assert standing_desk.wikilinks == []
 
 
-def test_load_vault_content_excludes_frontmatter_block():
-    notes = load_vault(VAULT_DIR)
+def test_load_vault_content_excludes_frontmatter_block(sample_vault: Path):
+    notes = load_vault(sample_vault)
     fasting = notes["Intermittent Fasting"]
     assert "---" not in fasting.content
     assert "tags:" not in fasting.content
     assert "16:8" in fasting.content
+
+
+# ---- smoke test against the real fixture vault -----------------------------
+
+
+def test_load_vault_fixture_vault_loads_every_note():
+    notes = load_vault(FIXTURE_VAULT_DIR)
+    expected = {p.stem for p in FIXTURE_VAULT_DIR.rglob("*.md")}
+    assert expected, f"no .md files in {FIXTURE_VAULT_DIR}"
+    assert set(notes.keys()) == expected

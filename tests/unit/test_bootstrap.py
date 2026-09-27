@@ -26,6 +26,7 @@ import chromadb
 import pytest
 
 from capretrieve.bootstrap import build_default_app, build_default_graph, build_default_registry
+from capretrieve.connectors.chroma.embeddings import HashingEmbeddingFunction
 from capretrieve.contracts.health import HealthState
 from capretrieve.settings import Settings
 
@@ -33,9 +34,9 @@ from capretrieve.settings import Settings
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(
-        openrouter_api_key=None,
+        llm_api_key=None,
         web_search_api_key=None,
-        chroma_persist_dir=tmp_path / "chroma",  # unused when chroma_client is injected
+        chroma_persist_dir=tmp_path / "chroma",
     )
 
 
@@ -44,46 +45,46 @@ def chroma_client() -> chromadb.ClientAPI:
     return chromadb.EphemeralClient(settings=chromadb.config.Settings(anonymized_telemetry=False))
 
 
-def test_build_default_registry_registers_all_three_connectors(settings, chroma_client):
-    registry = build_default_registry(settings, chroma_client=chroma_client)
+@pytest.fixture
+def ef() -> HashingEmbeddingFunction:
+    """Explicit embedding function — never depends on EMBEDDING_MODEL env var."""
+    return HashingEmbeddingFunction()
+
+
+def test_build_default_registry_registers_all_three_connectors(settings, chroma_client, ef):
+    registry = build_default_registry(settings, chroma_client=chroma_client, embedding_function=ef)
     ids = {c.manifest().connector_id for c in registry.all()}
     assert ids == {"obsidian", "chroma", "web_search"}
 
 
-async def test_build_default_registry_chroma_is_ingested(settings, chroma_client):
-    registry = build_default_registry(settings, chroma_client=chroma_client)
+async def test_build_default_registry_chroma_is_ingested(settings, chroma_client, ef):
+    registry = build_default_registry(settings, chroma_client=chroma_client, embedding_function=ef)
     chroma = registry.get("chroma")
-    # health() reports OK only if the collection is non-empty, i.e.
-    # ingestion actually ran as part of building the registry.
     health = await chroma.health()
     assert health.state == HealthState.OK
 
 
-def test_build_default_registry_obsidian_uses_configured_vault_dir(settings, chroma_client):
-    registry = build_default_registry(settings, chroma_client=chroma_client)
+def test_build_default_registry_obsidian_uses_configured_vault_dir(settings, chroma_client, ef):
+    registry = build_default_registry(settings, chroma_client=chroma_client, embedding_function=ef)
     obsidian = registry.get("obsidian")
     assert obsidian._vault_dir == settings.vault_dir
 
 
-def test_build_default_graph_raises_without_openrouter_key(settings, chroma_client):
-    registry = build_default_registry(settings, chroma_client=chroma_client)
-    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+def test_build_default_graph_raises_without_openrouter_key(settings, chroma_client, ef):
+    registry = build_default_registry(settings, chroma_client=chroma_client, embedding_function=ef)
+    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
         build_default_graph(settings, registry=registry)
 
 
 def test_build_default_app_raises_without_openrouter_key(settings):
-    # deliberately does NOT build a registry first — should fail fast on
-    # the missing key before ever touching chroma/connectors.
-    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
         build_default_app(settings)
 
 
-def test_build_default_graph_accepts_a_prebuilt_registry(settings, chroma_client, monkeypatch):
-    """When a registry is passed in, build_default_graph should reuse it
-    rather than building a second one (avoids double-ingesting Chroma)."""
-    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key-not-actually-called")
-    settings.openrouter_api_key = "fake-key-not-actually-called"
+def test_build_default_graph_accepts_a_prebuilt_registry(settings, chroma_client, ef, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake-key-not-actually-called")
+    settings.llm_api_key = "fake-key-not-actually-called"
 
-    registry = build_default_registry(settings, chroma_client=chroma_client)
+    registry = build_default_registry(settings, chroma_client=chroma_client, embedding_function=ef)
     graph = build_default_graph(settings, registry=registry)
     assert graph is not None

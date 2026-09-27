@@ -1,13 +1,5 @@
 """
-settings.py — all runtime configuration read from environment variables,
-in one place.
-
-Deliberately not a Pydantic BaseSettings subclass — this project's config
-surface is small enough that a plain dataclass reading os.environ
-directly is easier to follow and doesn't add a pydantic-settings
-dependency for a handful of fields. python-dotenv is used only to load a
-.env file if present (local dev convenience); actual values always come
-from the environment.
+settings.py — all runtime configuration read from environment variables.
 """
 
 from __future__ import annotations
@@ -22,36 +14,47 @@ load_dotenv()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Default model slugs are pinned, real OpenRouter model IDs. An earlier
-# version of this default used OpenRouter's website-displayed "-latest"
-# alias (e.g. "anthropic/claude-sonnet-latest") on the assumption it was
-# a valid API model ID that would dodge future deprecation — live
-# testing against the real API proved that wrong: OpenRouter's
-# completions endpoint rejects "-latest" aliases outright ("not a valid
-# model ID"). Those aliases appear to be a website-only routing
-# convenience, not something the /chat/completions endpoint accepts.
-# So: this WILL need updating again whenever anthropic/claude-sonnet-5
-# itself is eventually deprecated — there's no current alias-based way
-# around that. Check https://openrouter.ai/anthropic for the current
-# model list if requests start failing with "not a valid model ID" or a
-# 404 on this endpoint again.
+# Provider-agnostic defaults. Switch provider by changing LLM_API_BASE
+# and LLM_API_KEY in .env — no code changes needed.
+#
+# OpenRouter:  LLM_API_BASE=https://openrouter.ai/api/v1
+#              LLM_API_KEY=sk-or-...
+#              ANALYZER_MODEL=anthropic/claude-sonnet-5
+#
+# Groq:        LLM_API_BASE=https://api.groq.com/openai/v1
+#              LLM_API_KEY=gsk_...
+#              ANALYZER_MODEL=llama-3.3-70b-versatile
+#
+# Free (OpenRouter free router):
+#              LLM_API_BASE=https://openrouter.ai/api/v1
+#              LLM_API_KEY=sk-or-...
+#              ANALYZER_MODEL=openrouter/free
 
 
 @dataclass
 class Settings:
-    # --- LLM (OpenRouter) ---
-    openrouter_api_key: str | None = field(
-        default_factory=lambda: os.environ.get("OPENROUTER_API_KEY")
+    # --- LLM provider ---
+    llm_api_base: str = field(
+        default_factory=lambda: os.environ.get(
+            "LLM_API_BASE", "https://openrouter.ai/api/v1"
+        )
+    )
+    llm_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("LLM_API_KEY")
+        or os.environ.get("OPENROUTER_API_KEY")  # backward compat
     )
     analyzer_model: str = field(
         default_factory=lambda: os.environ.get(
-            "ANALYZER_MODEL", "anthropic/claude-sonnet-5"
+            "ANALYZER_MODEL", "openrouter/free"
         )
     )
     synthesis_model: str = field(
         default_factory=lambda: os.environ.get(
-            "SYNTHESIS_MODEL", "anthropic/claude-sonnet-5"
+            "SYNTHESIS_MODEL", "openrouter/free"
         )
+    )
+    llm_max_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("LLM_MAX_TOKENS", "4096"))
     )
 
     # --- Web search (Tavily) ---
@@ -87,17 +90,18 @@ class Settings:
         default_factory=lambda: int(os.environ.get("MAX_FUSED_ITEMS", "10"))
     )
 
-    def require_openrouter_api_key(self) -> str:
-        if not self.openrouter_api_key:
+    def require_llm_api_key(self) -> str:
+        if not self.llm_api_key:
             raise RuntimeError(
-                "OPENROUTER_API_KEY is not set. Set it in your environment or "
-                ".env file before starting the API."
+                "LLM_API_KEY (or OPENROUTER_API_KEY) is not set. "
+                "Set it in your environment or .env file before starting the API."
             )
-        return self.openrouter_api_key
+        return self.llm_api_key
+
+    # Backward compat alias
+    def require_openrouter_api_key(self) -> str:
+        return self.require_llm_api_key()
 
 
 def get_settings() -> Settings:
-    """Constructs a fresh Settings from the current environment. Not
-    cached — tests and scripts that mutate os.environ between calls (e.g.
-    monkeypatch) should see the change reflected."""
     return Settings()

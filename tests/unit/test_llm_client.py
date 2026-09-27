@@ -16,9 +16,11 @@ import pytest
 from capretrieve.llm.client import (
     DEFAULT_MAX_TOKENS,
     EmptyCompletionError,
-    OpenRouterClient,
-    OpenRouterError,
+    LLMClient,
+    LLMError,
 )
+OpenRouterError = LLMError
+OpenRouterClient = LLMClient
 
 
 class FakeResponse:
@@ -49,7 +51,7 @@ def test_complete_returns_message_content(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="test-key", model="anthropic/claude-sonnet-latest")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="test-key", model="anthropic/claude-sonnet-latest")
     result = client.complete([{"role": "user", "content": "hi"}])
 
     assert result == "the answer"
@@ -65,7 +67,7 @@ def test_complete_sends_correct_url_and_auth_header(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="my-secret-key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="my-secret-key", model="some/model")
     client.complete([{"role": "user", "content": "hi"}])
 
     assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
@@ -81,7 +83,7 @@ def test_complete_includes_default_max_tokens(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
     client.complete([{"role": "user", "content": "hi"}])
 
     assert captured["json"]["max_tokens"] == DEFAULT_MAX_TOKENS
@@ -96,7 +98,7 @@ def test_complete_allows_overriding_max_tokens_per_call(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
     client.complete([{"role": "user", "content": "hi"}], max_tokens=100)
 
     assert captured["json"]["max_tokens"] == 100
@@ -111,7 +113,7 @@ def test_complete_constructor_max_tokens_override(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model", max_tokens=2048)
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model", max_tokens=2048)
     client.complete([{"role": "user", "content": "hi"}])
 
     assert captured["json"]["max_tokens"] == 2048
@@ -126,7 +128,7 @@ def test_complete_sends_model_and_messages(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="anthropic/claude-sonnet-latest")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="anthropic/claude-sonnet-latest")
     messages = [{"role": "user", "content": "distinctive query xyzzy"}]
     client.complete(messages)
 
@@ -143,7 +145,7 @@ def test_complete_raises_openrouter_error_with_body_on_400(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
 
     with pytest.raises(OpenRouterError) as exc_info:
         client.complete([{"role": "user", "content": "hi"}])
@@ -161,7 +163,7 @@ def test_complete_raises_openrouter_error_on_401(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="bad-key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="bad-key", model="some/model")
 
     with pytest.raises(OpenRouterError) as exc_info:
         client.complete([{"role": "user", "content": "hi"}])
@@ -175,7 +177,7 @@ def test_complete_does_not_raise_on_200(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
     result = client.complete([{"role": "user", "content": "hi"}])
     assert result == "hello from the model"
 
@@ -189,12 +191,12 @@ def test_complete_raises_empty_completion_error_on_null_content(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
     with pytest.raises(EmptyCompletionError) as exc_info:
         client.complete([{"role": "user", "content": "hi"}])
 
     assert "length" in str(exc_info.value)
-    assert "reasoning" in str(exc_info.value).lower()
+    assert "max_tokens" in str(exc_info.value).lower()
 
 
 def test_complete_raises_empty_completion_error_on_missing_content_key(monkeypatch):
@@ -206,7 +208,7 @@ def test_complete_raises_empty_completion_error_on_missing_content_key(monkeypat
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
     with pytest.raises(EmptyCompletionError):
         client.complete([{"role": "user", "content": "hi"}])
 
@@ -220,7 +222,7 @@ def test_complete_raises_empty_completion_error_on_empty_string_content(monkeypa
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = OpenRouterClient(api_key="key", model="some/model")
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="key", model="some/model")
     with pytest.raises(EmptyCompletionError):
         client.complete([{"role": "user", "content": "hi"}])
 
