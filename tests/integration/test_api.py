@@ -227,6 +227,31 @@ def test_post_query_defaults_top_k(client: TestClient):
     assert resp.status_code == 200
 
 
+def test_get_trace_view_returns_html_page(client: TestClient):
+    resp = client.get(
+        "/trace/view",
+        params={"query": "What does the literature say about intermittent fasting?", "top_k": 3},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+
+
+def test_get_trace_view_shows_query_selection_and_answer(client: TestClient):
+    resp = client.get(
+        "/trace/view",
+        params={"query": "What does the literature say about intermittent fasting?"},
+    )
+    body = resp.text
+    assert "What does the literature say about intermittent fasting?" in body
+    assert "<strong>Selected:</strong> chroma</p>" in body
+    assert "Intermittent fasting seems to help with energy [1]." in body
+
+
+def test_get_trace_view_missing_query_returns_422(client: TestClient):
+    resp = client.get("/trace/view")
+    assert resp.status_code == 422
+
+
 def test_post_query_two_source_query_returns_provenance_tagged_evidence():
     """The Phase 4 exit criterion, now exercised through the actual HTTP
     API surface rather than calling the graph directly."""

@@ -103,6 +103,7 @@ This gives you FastAPI's interactive UI where you can try all three endpoints di
 | ------------- | ------ | ----------------------------------------------------------------- |
 | `/docs`       | GET    | Interactive API explorer (Swagger UI)                             |
 | `/query`      | POST   | Submit a query — returns answer, evidence, and full routing trace |
+| `/trace/view` | GET    | Same as `/query`, rendered as an HTML page for the browser        |
 | `/connectors` | GET    | View all registered connector manifests                           |
 | `/health`     | GET    | Check the status of each connector                                |
 
@@ -115,6 +116,12 @@ In the `/docs` UI, expand `POST /query`, click **Try it out**, and enter:
   "query": "What other notes link to my project retrospective, and what did those say?",
   "top_k": 5
 }
+```
+
+Or open the routing trace for the same query directly in your browser:
+
+```
+http://localhost:18000/trace/view?query=What+other+notes+link+to+my+project+retrospective
 ```
 
 ---
