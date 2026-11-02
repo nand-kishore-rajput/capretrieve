@@ -14,6 +14,17 @@ load_dotenv()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+
+def _env(name: str, default: str | None = None) -> str | None:
+    """Read an env var, treating an empty value as unset.
+
+    `.env.example` lists every variable as `KEY=` so it can be copied as-is;
+    python-dotenv loads those as "". Without this, "" would override the
+    default — int("") crashes, Path("") silently means the cwd, and an empty
+    model id reaches the LLM API.
+    """
+    return os.environ.get(name) or default
+
 # Provider-agnostic defaults. Switch provider by changing LLM_API_BASE
 # and LLM_API_KEY in .env — no code changes needed.
 #
@@ -35,63 +46,63 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class Settings:
     # --- LLM provider ---
     llm_api_base: str = field(
-        default_factory=lambda: os.environ.get(
+        default_factory=lambda: _env(
             "LLM_API_BASE", "https://openrouter.ai/api/v1"
         )
     )
     llm_api_key: str | None = field(
-        default_factory=lambda: os.environ.get("LLM_API_KEY")
-        or os.environ.get("OPENROUTER_API_KEY")  # backward compat
+        default_factory=lambda: _env("LLM_API_KEY")
+        or _env("OPENROUTER_API_KEY")  # backward compat
     )
     analyzer_model: str = field(
-        default_factory=lambda: os.environ.get(
+        default_factory=lambda: _env(
             "ANALYZER_MODEL", "openrouter/free"
         )
     )
     synthesis_model: str = field(
-        default_factory=lambda: os.environ.get(
+        default_factory=lambda: _env(
             "SYNTHESIS_MODEL", "openrouter/free"
         )
     )
     llm_max_tokens: int = field(
-        default_factory=lambda: int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+        default_factory=lambda: int(_env("LLM_MAX_TOKENS", "4096"))
     )
 
     # --- Web search (Tavily) ---
     web_search_api_key: str | None = field(
-        default_factory=lambda: os.environ.get("WEB_SEARCH_API_KEY")
+        default_factory=lambda: _env("WEB_SEARCH_API_KEY")
     )
     # Shared secret for GET /trace/view; unset or empty disables that page.
     trace_view_token: str | None = field(
-        default_factory=lambda: os.environ.get("TRACE_VIEW_TOKEN") or None
+        default_factory=lambda: _env("TRACE_VIEW_TOKEN")
     )
 
     # --- Data locations ---
     config_dir: Path = field(
         default_factory=lambda: Path(
-            os.environ.get("CONFIG_DIR", str(REPO_ROOT / "configs" / "connectors"))
+            _env("CONFIG_DIR", str(REPO_ROOT / "configs" / "connectors"))
         )
     )
     vault_dir: Path = field(
         default_factory=lambda: Path(
-            os.environ.get("VAULT_DIR", str(REPO_ROOT / "fixtures" / "data" / "vault"))
+            _env("VAULT_DIR", str(REPO_ROOT / "fixtures" / "data" / "vault"))
         )
     )
     corpus_dir: Path = field(
         default_factory=lambda: Path(
-            os.environ.get("CORPUS_DIR", str(REPO_ROOT / "fixtures" / "data" / "corpus"))
+            _env("CORPUS_DIR", str(REPO_ROOT / "fixtures" / "data" / "corpus"))
         )
     )
     chroma_persist_dir: Path = field(
-        default_factory=lambda: Path(os.environ.get("CHROMA_PERSIST_DIR", ".chroma"))
+        default_factory=lambda: Path(_env("CHROMA_PERSIST_DIR", ".chroma"))
     )
 
     # --- Query defaults ---
     default_top_k: int = field(
-        default_factory=lambda: int(os.environ.get("DEFAULT_TOP_K", "5"))
+        default_factory=lambda: int(_env("DEFAULT_TOP_K", "5"))
     )
     max_fused_items: int = field(
-        default_factory=lambda: int(os.environ.get("MAX_FUSED_ITEMS", "10"))
+        default_factory=lambda: int(_env("MAX_FUSED_ITEMS", "10"))
     )
 
     def require_llm_api_key(self) -> str:
