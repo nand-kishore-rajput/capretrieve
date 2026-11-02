@@ -5,6 +5,10 @@ defaults, and the required-key guard.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from dotenv import dotenv_values
+
 from capretrieve.settings import Settings, get_settings
 
 
@@ -147,3 +151,43 @@ def test_trace_view_token_unset_or_empty_means_disabled(monkeypatch):
     assert Settings().trace_view_token is None
     monkeypatch.delenv("TRACE_VIEW_TOKEN")
     assert Settings().trace_view_token is None
+
+
+ENV_EXAMPLE = Path(__file__).parents[2] / ".env.example"
+
+SETTINGS_ENV_VARS = [
+    "LLM_API_BASE", "LLM_API_KEY", "OPENROUTER_API_KEY", "ANALYZER_MODEL",
+    "SYNTHESIS_MODEL", "LLM_MAX_TOKENS", "WEB_SEARCH_API_KEY", "TRACE_VIEW_TOKEN",
+    "CONFIG_DIR", "VAULT_DIR", "CORPUS_DIR", "CHROMA_PERSIST_DIR",
+    "DEFAULT_TOP_K", "MAX_FUSED_ITEMS",
+]
+
+
+def _default_settings(monkeypatch) -> Settings:
+    for var in SETTINGS_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    return Settings()
+
+
+def test_empty_env_values_fall_back_to_defaults(monkeypatch):
+    """`KEY=` in .env sets the variable to "", which must mean "use the
+    default" — not int("") crashing, or Path("") pointing at the cwd."""
+    defaults = _default_settings(monkeypatch)
+    for var in SETTINGS_ENV_VARS:
+        monkeypatch.setenv(var, "")
+
+    assert Settings() == defaults
+
+
+def test_env_example_copied_as_is_yields_defaults(monkeypatch):
+    """The documented setup is `cp .env.example .env`; that must start."""
+    defaults = _default_settings(monkeypatch)
+    for key, value in dotenv_values(ENV_EXAMPLE).items():
+        monkeypatch.setenv(key, value or "")
+
+    assert Settings() == defaults
+
+
+def test_env_example_ends_with_newline():
+    """Otherwise `echo KEY=value >> .env` glues onto the last line."""
+    assert ENV_EXAMPLE.read_text().endswith("\n")
