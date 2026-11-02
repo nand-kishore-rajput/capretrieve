@@ -72,3 +72,11 @@ def test_expand_stops_growing_once_frontier_exhausted(notes):
     depth_2 = expand_neighbourhood(notes, "Project Retrospective", depth=2)
     depth_10 = expand_neighbourhood(notes, "Project Retrospective", depth=10)
     assert {n.note_name for n in depth_2} == {n.note_name for n in depth_10}
+
+def test_expand_returns_seed_first_then_neighbours_sorted(notes):
+    result = expand_neighbourhood(notes, "Project Retrospective", depth=1)
+    assert [n.note_name for n in result] == [
+        "Project Retrospective",
+        "Sprint Planning",
+        "Standing Desk",
+    ]

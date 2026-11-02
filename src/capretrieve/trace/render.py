@@ -39,7 +39,8 @@ def _decision_row(decision) -> str:
 def _execution_row(record) -> str:
     return (
         f"<tr><td>{html.escape(record.connector_id)}</td>"
-        f"<td>{record.evidence_count}</td></tr>"
+        f"<td>{record.evidence_count}</td>"
+        f"<td class='excluded'>{html.escape(record.error or '')}</td></tr>"
     )
 
 
@@ -93,7 +94,7 @@ def render_html(trace: PlanTrace) -> str:
 
   <h2>Execution</h2>
   <table>
-    <tr><th>Connector</th><th>Evidence Count</th></tr>
+    <tr><th>Connector</th><th>Evidence Count</th><th>Error</th></tr>
     {execution_rows}
   </table>
 

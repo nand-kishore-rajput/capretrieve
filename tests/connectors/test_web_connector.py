@@ -15,6 +15,8 @@ in a demo.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -142,3 +144,19 @@ def test_connector_constructs_real_tavily_client_when_no_client_injected(manifes
     is injected. Does not perform a live search."""
     connector = WebSearchConnector(manifest=manifest, api_key=None)
     assert isinstance(connector._client, TavilyClient)
+
+class SlowTavilyClient(FakeTavilyClient):
+    def search(self, query: str, **kwargs) -> dict:
+        time.sleep(0.3)  # the real TavilyClient.search is a blocking call
+        return super().search(query, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_does_not_block_the_event_loop(manifest):
+    connector = WebSearchConnector(manifest=manifest, client=SlowTavilyClient(SAMPLE_RESPONSE))
+    req = RetrievalRequest(query="q", top_k=2)
+
+    start = time.perf_counter()
+    await asyncio.gather(connector.retrieve(req), connector.retrieve(req))
+
+    assert time.perf_counter() - start < 0.5

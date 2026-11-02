@@ -24,6 +24,8 @@ class ConnectorExecutionRecord(BaseModel):
 
     connector_id: str
     evidence_count: int
+    error: str | None = None
+    """Set when the connector raised during retrieve(); None on success."""
 
 
 class PlanTrace(BaseModel):

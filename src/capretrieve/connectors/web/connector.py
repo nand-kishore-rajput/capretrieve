@@ -30,6 +30,7 @@ fact is what S1 (privacy hard-block) depends on later.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from tavily import TavilyClient
@@ -77,7 +78,9 @@ class WebSearchConnector:
             # would reject the request outright.
             search_kwargs["timeout"] = max(req.deadline_ms / 1000, 1.0)
 
-        response = self._client.search(req.query, **search_kwargs)
+        # TavilyClient.search is a blocking HTTP call; run it in a thread
+        # so parallel retrieve branches (and other requests) aren't stalled.
+        response = await asyncio.to_thread(self._client.search, req.query, **search_kwargs)
         results = response.get("results", [])
 
         evidence = [

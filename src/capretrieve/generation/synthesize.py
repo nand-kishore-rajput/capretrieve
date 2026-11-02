@@ -21,6 +21,8 @@ from capretrieve.llm.structured import CompletesText
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "synthesis.md"
 
+NO_EVIDENCE_ANSWER = "No permitted source returned evidence for this query."
+
 
 def load_prompt_template() -> str:
     return PROMPT_PATH.read_text()
@@ -45,7 +47,14 @@ def synthesize(client: CompletesText, query: str, evidence: list[Evidence]) -> s
     `client` is injected (same dependency-injection pattern used
     throughout this project) so this is testable with a fake client
     returning canned prose, without a real OpenRouter call.
+
+    With no evidence there is nothing to ground an answer in, so no LLM
+    call is made. That also keeps a privacy-blocked query (empty plan) from
+    being sent to the external LLM provider just to say "I don't know".
     """
+    if not evidence:
+        return NO_EVIDENCE_ANSWER
+
     template = load_prompt_template()
     prompt = template.replace("{query}", query).replace(
         "{evidence_block}", _format_evidence_block(evidence)

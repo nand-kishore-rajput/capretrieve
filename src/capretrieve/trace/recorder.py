@@ -26,8 +26,14 @@ def build_trace(state: GraphState) -> PlanTrace:
     for evidence_item in raw_evidence:
         counts[evidence_item.source_id] = counts.get(evidence_item.source_id, 0) + 1
 
+    errors = {e["connector_id"]: e["error"] for e in state.get("retrieval_errors", [])}
+
     execution = [
-        ConnectorExecutionRecord(connector_id=connector_id, evidence_count=count)
+        ConnectorExecutionRecord(
+            connector_id=connector_id,
+            evidence_count=count,
+            error=errors.get(connector_id),
+        )
         for connector_id, count in counts.items()
     ]
 

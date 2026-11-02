@@ -109,4 +109,5 @@ def build_default_app(settings: Settings | None = None):
         analyzer_client,
         synthesis_client,
         default_top_k=settings.default_top_k,
+        max_fused_items=settings.max_fused_items,
     )

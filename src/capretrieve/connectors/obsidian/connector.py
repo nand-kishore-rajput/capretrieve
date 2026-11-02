@@ -25,6 +25,8 @@ match into the notes dict.
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +36,21 @@ from capretrieve.contracts.health import HealthState, HealthStatus
 from capretrieve.contracts.request import RetrievalRequest
 from capretrieve.contracts.result import Evidence, RetrievalResult
 from capretrieve.manifest.models import CapabilityManifest
+
+_WORD_RE = re.compile(r"\w+")
+
+# Common English function words that appear in almost every note and
+# almost every question; counting them makes long notes win by volume.
+_STOPWORDS = frozenset(
+    "a about an and are as at be been but by can did do does for from had has "
+    "have how i in is it its me my of on or our say says so than that the "
+    "their them then there these they this to was we were what when where "
+    "which who why will with you your".split()
+)
+
+
+def _tokenize(text: str) -> list[str]:
+    return _WORD_RE.findall(text.lower())
 
 
 def _resolve_seed_note(notes: dict[str, Note], seed: str) -> str | None:
@@ -80,10 +97,23 @@ class ObsidianConnector:
         self._manifest = manifest
         self._vault_dir = vault_dir
         self._notes: dict[str, Note] | None = None
+        self._loaded_mtime: float | None = None
+
+    def _vault_mtime(self) -> float:
+        """Newest modification time across the vault's notes and the vault
+        directory itself (which changes when a note is added or deleted)."""
+        mtimes = [self._vault_dir.stat().st_mtime]
+        mtimes.extend(p.stat().st_mtime for p in self._vault_dir.rglob("*.md"))
+        return max(mtimes)
 
     def _ensure_loaded(self) -> dict[str, Note]:
-        if self._notes is None:
+        """Load the vault, reloading whenever a note has changed since the
+        last load. The manifest declares freshness=live, and the planner
+        routes on that — so a cache that never refreshes would be a lie."""
+        mtime = self._vault_mtime()
+        if self._notes is None or mtime != self._loaded_mtime:
             self._notes = load_vault(self._vault_dir)
+            self._loaded_mtime = mtime
         return self._notes
 
     def manifest(self) -> CapabilityManifest:
@@ -97,12 +127,13 @@ class ObsidianConnector:
         if seed_note:
             depth = int(filters.get("depth", 1))
             resolved_seed = _resolve_seed_note(notes, seed_note)
-            matched_notes = (
-                expand_neighbourhood(notes, resolved_seed, depth=depth)
-                if resolved_seed is not None
-                else []
-            )
-            scored = [(note, 1.0) for note in matched_notes]
+            if resolved_seed is not None:
+                matched_notes = expand_neighbourhood(notes, resolved_seed, depth=depth)
+                scored = [(note, 1.0) for note in matched_notes]
+            else:
+                # No note is titled like the seed; notes that mention it
+                # are the next best thing to an empty answer.
+                scored = self._keyword_search(notes, seed_note)
         else:
             scored = self._keyword_search(notes, req.query)
 
@@ -121,23 +152,21 @@ class ObsidianConnector:
     def _keyword_search(
         self, notes: dict[str, Note], query: str
     ) -> list[tuple[Note, float]]:
-        """Naive keyword/tag relevance: count of query terms appearing in
-        note content, title, or tags. Deliberately simple — this connector
-        exists to prove the contract works end-to-end, not to be a good
-        search engine. Swapping this for a real index later doesn't
-        change the Connector interface."""
-        terms = [t.lower() for t in query.split() if t]
+        """Naive keyword/tag relevance: count of whole-word query-term
+        occurrences in note content, title, or tags, ignoring stopwords.
+        Deliberately simple — this connector exists to prove the contract
+        works end-to-end, not to be a good search engine. Swapping this
+        for a real index later doesn't change the Connector interface."""
+        terms = set(_tokenize(query)) - _STOPWORDS
         scored: list[tuple[Note, float]] = []
+        if not terms:
+            return scored
 
         for note in notes.values():
-            haystack = " ".join(
-                [
-                    note.note_name.lower(),
-                    note.content.lower(),
-                    " ".join(note.tags).lower(),
-                ]
+            words = Counter(
+                _tokenize(" ".join([note.note_name, note.content, " ".join(note.tags)]))
             )
-            hits = sum(haystack.count(term) for term in terms)
+            hits = sum(words[term] for term in terms)
             if hits > 0:
                 scored.append((note, float(hits)))
 

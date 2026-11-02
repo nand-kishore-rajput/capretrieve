@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from capretrieve.contracts.result import Evidence
 from capretrieve.generation.synthesize import (
+    NO_EVIDENCE_ANSWER,
     _format_evidence_block,
     load_prompt_template,
     synthesize,
@@ -44,7 +45,7 @@ def test_synthesize_returns_the_client_response():
 
 def test_synthesize_includes_query_in_prompt():
     client = FakeLLMClient("answer")
-    synthesize(client, "a very distinctive question xyzzy", [])
+    synthesize(client, "a very distinctive question xyzzy", [_ev("chroma", "some evidence")])
     sent = client.calls[0][0]["content"]
     assert "a very distinctive question xyzzy" in sent
 
@@ -54,14 +55,6 @@ def test_synthesize_includes_evidence_content_in_prompt():
     synthesize(client, "q", [_ev("chroma", "a very distinctive evidence snippet xyzzy")])
     sent = client.calls[0][0]["content"]
     assert "a very distinctive evidence snippet xyzzy" in sent
-
-
-def test_synthesize_with_no_evidence_still_calls_client():
-    client = FakeLLMClient("I don't have enough information to answer that.")
-    result = synthesize(client, "q", [])
-    assert result == "I don't have enough information to answer that."
-    sent = client.calls[0][0]["content"]
-    assert "no evidence was retrieved" in sent
 
 
 def test_format_evidence_block_includes_source_and_uri():
@@ -84,3 +77,13 @@ def test_prompt_template_has_required_placeholders():
     template = load_prompt_template()
     assert "{query}" in template
     assert "{evidence_block}" in template
+
+def test_synthesize_skips_llm_call_when_there_is_no_evidence():
+    """No evidence means nothing to ground an answer in — and for a
+    privacy-blocked query, calling the LLM would send the query out anyway."""
+    client = FakeLLMClient("should not be used")
+
+    answer = synthesize(client, "my private question", [])
+
+    assert client.calls == []
+    assert answer == NO_EVIDENCE_ANSWER

@@ -124,7 +124,11 @@ class LLMClient:
             raise LLMError(response.status_code, response.text)
 
         data = response.json()
-        content = data["choices"][0]["message"].get("content")
+        choices = data.get("choices") or []
+        if not choices:
+            # Some providers report upstream failures as 200 + {"error": ...}
+            raise LLMError(response.status_code, response.text)
+        content = choices[0].get("message", {}).get("content")
 
         if not content:
             raise EmptyCompletionError(data)
