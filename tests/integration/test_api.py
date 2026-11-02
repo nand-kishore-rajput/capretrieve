@@ -25,6 +25,7 @@ from capretrieve.registry.static import build_registry
 CONFIG_DIR = Path(__file__).parents[2] / "configs" / "connectors"
 VAULT_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "vault"
 CORPUS_DIR = Path(__file__).parents[2] / "fixtures" / "data" / "corpus"
+TRACE_TOKEN = "test-token"
 
 
 class FakeLLMClient:
@@ -87,7 +88,7 @@ def client() -> TestClient:
     )
     synthesis_client = FakeLLMClient("Intermittent fasting seems to help with energy [1].")
 
-    app = create_app(registry, analyzer_client, synthesis_client)
+    app = create_app(registry, analyzer_client, synthesis_client, trace_view_token=TRACE_TOKEN)
     return TestClient(app)
 
 
@@ -230,7 +231,11 @@ def test_post_query_defaults_top_k(client: TestClient):
 def test_get_trace_view_returns_html_page(client: TestClient):
     resp = client.get(
         "/trace/view",
-        params={"query": "What does the literature say about intermittent fasting?", "top_k": 3},
+        params={
+            "query": "What does the literature say about intermittent fasting?",
+            "top_k": 3,
+            "token": TRACE_TOKEN,
+        },
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
@@ -239,7 +244,10 @@ def test_get_trace_view_returns_html_page(client: TestClient):
 def test_get_trace_view_shows_query_selection_and_answer(client: TestClient):
     resp = client.get(
         "/trace/view",
-        params={"query": "What does the literature say about intermittent fasting?"},
+        params={
+            "query": "What does the literature say about intermittent fasting?",
+            "token": TRACE_TOKEN,
+        },
     )
     body = resp.text
     assert "What does the literature say about intermittent fasting?" in body
@@ -248,7 +256,7 @@ def test_get_trace_view_shows_query_selection_and_answer(client: TestClient):
 
 
 def test_get_trace_view_missing_query_returns_422(client: TestClient):
-    resp = client.get("/trace/view")
+    resp = client.get("/trace/view", params={"token": TRACE_TOKEN})
     assert resp.status_code == 422
 
 

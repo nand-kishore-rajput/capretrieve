@@ -24,6 +24,7 @@ from capretrieve.graph.build import build_graph
 from capretrieve.registry.static import build_registry
 
 CONFIG_DIR = Path(__file__).parents[2] / "configs" / "connectors"
+TOKEN = "test-token"
 
 
 class StubConnector:
@@ -60,8 +61,10 @@ class FakeLLMClient:
     def __init__(self, response: str, delay_s: float = 0.0) -> None:
         self.response = response
         self.delay_s = delay_s
+        self.calls = 0
 
     def complete(self, messages: list[dict], **kwargs) -> str:
+        self.calls += 1
         if self.delay_s:
             time.sleep(self.delay_s)  # a blocking call, like the real httpx.post
         return self.response
@@ -128,8 +131,9 @@ def test_trace_view_shows_source_error_and_sets_csp():
         _registry(obsidian=broken),
         FakeLLMClient(_requirements_json(expects_personal_knowledge=True)),
         FakeLLMClient("answer"),
+        trace_view_token=TOKEN,
     )
-    resp = TestClient(app).get("/trace/view", params={"query": "my notes on q"})
+    resp = TestClient(app).get("/trace/view", params={"query": "my notes on q", "token": TOKEN})
 
     assert resp.status_code == 200
     assert "vault offline" in resp.text
@@ -154,3 +158,57 @@ async def test_llm_calls_do_not_block_concurrent_queries():
     elapsed = time.perf_counter() - start
 
     assert elapsed < 1.0
+
+
+def _trace_view_app(token: str | None = TOKEN):
+    analyzer = FakeLLMClient(_requirements_json())
+    app = create_app(_registry(), analyzer, FakeLLMClient("answer"), trace_view_token=token)
+    return TestClient(app), analyzer
+
+
+@pytest.mark.parametrize("params", [{}, {"token": "wrong-token"}])
+def test_trace_view_rejects_missing_or_wrong_token_before_any_llm_call(params):
+    client, analyzer = _trace_view_app()
+
+    resp = client.get("/trace/view", params={"query": "q", **params})
+
+    assert resp.status_code == 403
+    assert analyzer.calls == 0
+
+
+def test_trace_view_is_disabled_when_no_token_is_configured():
+    client, analyzer = _trace_view_app(token=None)
+
+    resp = client.get("/trace/view", params={"query": "q", "token": ""})
+
+    assert resp.status_code == 403
+    assert analyzer.calls == 0
+
+
+def test_trace_view_accepts_the_configured_token():
+    client, _ = _trace_view_app()
+
+    resp = client.get("/trace/view", params={"query": "q", "token": TOKEN})
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.parametrize("top_k", [0, 51, 100000])
+def test_trace_view_rejects_out_of_range_top_k(top_k):
+    client, analyzer = _trace_view_app()
+
+    resp = client.get("/trace/view", params={"query": "q", "token": TOKEN, "top_k": top_k})
+
+    assert resp.status_code == 422
+    assert analyzer.calls == 0
+
+
+@pytest.mark.parametrize("top_k", [0, 51, 100000])
+def test_query_rejects_out_of_range_top_k(top_k):
+    analyzer = FakeLLMClient(_requirements_json())
+    client = TestClient(create_app(_registry(), analyzer, FakeLLMClient("answer")))
+
+    resp = client.post("/query", json={"query": "q", "top_k": top_k})
+
+    assert resp.status_code == 422
+    assert analyzer.calls == 0

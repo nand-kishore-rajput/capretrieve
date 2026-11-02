@@ -29,10 +29,13 @@ def create_app(
     synthesis_client: CompletesText,
     default_top_k: int = 5,
     max_fused_items: int | None = None,
+    trace_view_token: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="CapRetrieve")
 
     app.state.registry = registry
+    # None disables GET /trace/view (see api/routes/trace.py)
+    app.state.trace_view_token = trace_view_token
     app.state.graph = build_graph(
         registry,
         analyzer_client,

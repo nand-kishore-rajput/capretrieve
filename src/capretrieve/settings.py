@@ -61,6 +61,10 @@ class Settings:
     web_search_api_key: str | None = field(
         default_factory=lambda: os.environ.get("WEB_SEARCH_API_KEY")
     )
+    # Shared secret for GET /trace/view; unset or empty disables that page.
+    trace_view_token: str | None = field(
+        default_factory=lambda: os.environ.get("TRACE_VIEW_TOKEN") or None
+    )
 
     # --- Data locations ---
     config_dir: Path = field(
