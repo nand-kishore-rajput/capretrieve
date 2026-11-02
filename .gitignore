@@ -163,6 +163,8 @@ db.sqlite3-journal
 # ============================================================
 
 data/
+# The sample vault and corpus are test/demo fixtures, not runtime output
+!fixtures/data/
 downloads/
 output/
 outputs/

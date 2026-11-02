@@ -5,7 +5,7 @@ defaults, and the required-key guard.
 
 from __future__ import annotations
 
-from capretrieve.settings import get_settings
+from capretrieve.settings import Settings, get_settings
 
 
 def test_defaults_resolve_relative_to_repo_root(monkeypatch):
@@ -136,3 +136,14 @@ def test_get_settings_returns_fresh_instance_each_call(monkeypatch):
     second = get_settings()
     assert first.llm_api_key == "key-one"
     assert second.llm_api_key == "key-two"
+
+def test_trace_view_token_reads_env(monkeypatch):
+    monkeypatch.setenv("TRACE_VIEW_TOKEN", "s3cret")
+    assert Settings().trace_view_token == "s3cret"
+
+
+def test_trace_view_token_unset_or_empty_means_disabled(monkeypatch):
+    monkeypatch.setenv("TRACE_VIEW_TOKEN", "")
+    assert Settings().trace_view_token is None
+    monkeypatch.delenv("TRACE_VIEW_TOKEN")
+    assert Settings().trace_view_token is None

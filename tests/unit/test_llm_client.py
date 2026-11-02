@@ -238,3 +238,17 @@ def test_empty_completion_error_no_hint_for_non_length_finish_reason():
     raw = {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]}
     error = EmptyCompletionError(raw)
     assert "reasoning" not in str(error).lower()
+
+def test_complete_raises_llm_error_on_200_without_choices(monkeypatch):
+    """Some providers answer 200 with an error object instead of choices;
+    that must surface as LLMError with the body, not a bare KeyError."""
+    body = {"error": {"message": "upstream provider unavailable", "code": 502}}
+
+    def fake_post(url, headers, json, timeout):
+        return FakeResponse(status_code=200, json_data=body)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = LLMClient(api_base="https://openrouter.ai/api/v1", api_key="k", model="m")
+
+    with pytest.raises(LLMError, match="upstream provider unavailable"):
+        client.complete([{"role": "user", "content": "hi"}])

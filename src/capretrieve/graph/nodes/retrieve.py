@@ -14,7 +14,9 @@ Two pieces:
     uses it to switch from keyword search to graph traversal.
   - make_retrieve_one_node: the per-branch node. Looks up the actual
     Connector instance from the registry and calls its retrieve(). This
-    is the only node that touches connectors/ directly.
+    is the only node that touches connectors/ directly. A connector that
+    raises contributes no evidence and a retrieval_errors entry instead,
+    so the other branches' evidence still reaches fuse and the trace.
 """
 
 from __future__ import annotations
@@ -72,13 +74,18 @@ def make_fan_out_router(default_top_k: int = 5) -> Callable:
 
 def make_retrieve_one_node(registry: Registry) -> Callable:
     async def retrieve_one_node(send_state: RetrieveOneInput) -> dict:
-        connector = registry.get(send_state["connector_id"])
+        connector_id = send_state["connector_id"]
+        connector = registry.get(connector_id)
         request = RetrievalRequest(
             query=send_state["query"],
             top_k=send_state["top_k"],
             filters=send_state.get("filters"),
         )
-        result = await connector.retrieve(request)
+        try:
+            result = await connector.retrieve(request)
+        except Exception as exc:  # noqa: BLE001 - one bad source must not sink the query
+            error = f"{type(exc).__name__}: {exc}"
+            return {"retrieval_errors": [{"connector_id": connector_id, "error": error}]}
         return {"raw_evidence": list(result.evidence)}
 
     return retrieve_one_node

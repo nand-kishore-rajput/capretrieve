@@ -33,6 +33,7 @@ from capretrieve.connectors.obsidian.traversal import expand_neighbourhood
 from capretrieve.connectors.obsidian.vault import load_vault
 from capretrieve.contracts.health import HealthState, HealthStatus
 from capretrieve.contracts.result import Evidence, RetrievalResult
+from capretrieve.generation.synthesize import NO_EVIDENCE_ANSWER
 from capretrieve.graph.build import build_graph
 from capretrieve.manifest.models import CapabilityManifest
 from capretrieve.registry.static import Registry, build_registry
@@ -307,4 +308,4 @@ async def test_empty_plan_skips_retrieval_and_still_synthesizes(wired_registry):
     assert result["execution_plan"].is_empty
     assert result.get("raw_evidence", []) == []
     assert result["fused_evidence"] == []
-    assert result["answer"] == "I don't have a source that can answer this."
+    assert result["answer"] == NO_EVIDENCE_ANSWER

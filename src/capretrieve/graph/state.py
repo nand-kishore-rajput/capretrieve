@@ -33,6 +33,10 @@ class GraphState(TypedDict, total=False):
     # rather than overwriting, which is what makes fan-out -> fan-in work.
     raw_evidence: Annotated[list[Evidence], operator.add]
 
+    # {"connector_id": ..., "error": ...} for each retrieve_one branch
+    # whose connector raised; accumulated across branches the same way.
+    retrieval_errors: Annotated[list[dict], operator.add]
+
     fused_evidence: list[Evidence]
     answer: str
 

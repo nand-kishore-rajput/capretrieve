@@ -103,6 +103,7 @@ This gives you FastAPI's interactive UI where you can try all three endpoints di
 | ------------- | ------ | ----------------------------------------------------------------- |
 | `/docs`       | GET    | Interactive API explorer (Swagger UI)                             |
 | `/query`      | POST   | Submit a query — returns answer, evidence, and full routing trace |
+| `/trace/view` | GET    | Same as `/query`, rendered as an HTML page (needs `token`)        |
 | `/connectors` | GET    | View all registered connector manifests                           |
 | `/health`     | GET    | Check the status of each connector                                |
 
@@ -116,6 +117,17 @@ In the `/docs` UI, expand `POST /query`, click **Try it out**, and enter:
   "top_k": 5
 }
 ```
+
+Or open the routing trace for the same query directly in your browser. This page
+needs `TRACE_VIEW_TOKEN` set in `.env` (e.g. `openssl rand -hex 16`) and passed as
+`token`; without it the page returns 403, so other websites can't spend your API
+credits by loading the URL:
+
+```
+http://localhost:18000/trace/view?query=What+other+notes+link+to+my+project+retrospective&token=<TRACE_VIEW_TOKEN>
+```
+
+`top_k` must be between 1 and 50 on both `/query` and `/trace/view`.
 
 ---
 

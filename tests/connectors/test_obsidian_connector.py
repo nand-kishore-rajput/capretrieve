@@ -8,6 +8,8 @@ health is also checked against the real fixture vault.
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -196,3 +198,89 @@ class TestResolveSeedNote:
         differently-named note, regardless of which is longer."""
         notes = {"Planning": object(), "Q3 Planning Doc": object()}
         assert _resolve_seed_note(notes, "planning") == "Planning"
+
+@pytest.mark.asyncio
+async def test_keyword_search_ignores_stopwords_and_punctuation(tmp_path: Path):
+    """Filler words must not outrank topical ones, and a trailing "?" must
+    not stop a term from matching."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Fasting.md").write_text("# Fasting\n\nNotes on fasting.\n", encoding="utf-8")
+    (vault / "Rambling.md").write_text(
+        "# Rambling\n\n" + "What does the other one say about the thing there? " * 20,
+        encoding="utf-8",
+    )
+    manifest = load_manifest_file(MANIFEST_PATH)
+    conn = ObsidianConnector(manifest=manifest, vault_dir=vault)
+
+    result = await conn.retrieve(
+        RetrievalRequest(query="What does the literature say about fasting?", top_k=5)
+    )
+
+    assert Path(result.evidence[0].uri).stem == "Fasting"
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_matches_whole_words_only(tmp_path: Path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Other.md").write_text("# Other\n\nanother other mother\n", encoding="utf-8")
+    manifest = load_manifest_file(MANIFEST_PATH)
+    conn = ObsidianConnector(manifest=manifest, vault_dir=vault)
+
+    result = await conn.retrieve(RetrievalRequest(query="moth", top_k=5))
+
+    assert result.evidence == []
+
+
+def _write_star_vault(root: Path, n_neighbours: int) -> Path:
+    root.mkdir(parents=True)
+    links = " ".join(f"[[Leaf {i}]]" for i in range(n_neighbours))
+    (root / "Hub.md").write_text(f"# Hub\n\n{links}\n", encoding="utf-8")
+    for i in range(n_neighbours):
+        (root / f"Leaf {i}.md").write_text(f"# Leaf {i}\n\nleaf body\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.asyncio
+async def test_traversal_keeps_seed_first_when_top_k_truncates(tmp_path: Path):
+    """With more neighbours than top_k, the seed note itself must survive
+    the cut, and the kept set must be deterministic."""
+    vault = _write_star_vault(tmp_path / "vault", n_neighbours=6)
+    manifest = load_manifest_file(MANIFEST_PATH)
+    conn = ObsidianConnector(manifest=manifest, vault_dir=vault)
+    req = RetrievalRequest(query="ignored", top_k=3, filters={"seed_note": "hub", "depth": 1})
+
+    result = await conn.retrieve(req)
+
+    stems = [Path(ev.uri).stem for ev in result.evidence]
+    assert stems == ["Hub", "Leaf 0", "Leaf 1"]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_seed_falls_back_to_keyword_search(connector: ObsidianConnector):
+    """A seed that matches no note title should still find notes that
+    mention it, rather than returning nothing."""
+    result = await connector.retrieve(
+        RetrievalRequest(query="ignored", top_k=5, filters={"seed_note": "protocol eating window"})
+    )
+    stems = {Path(ev.uri).stem for ev in result.evidence}
+    assert "Intermittent Fasting" in stems
+
+
+@pytest.mark.asyncio
+async def test_retrieve_sees_notes_added_after_first_load(sample_vault: Path):
+    """The manifest declares freshness=live, so edits made after the first
+    query must be visible to the next one."""
+    manifest = load_manifest_file(MANIFEST_PATH)
+    conn = ObsidianConnector(manifest=manifest, vault_dir=sample_vault)
+    await conn.retrieve(RetrievalRequest(query="kombucha", top_k=5))
+
+    new_note = sample_vault / "Kombucha.md"
+    new_note.write_text("# Kombucha\n\nSecond ferment notes.\n", encoding="utf-8")
+    later = time.time() + 10
+    os.utime(new_note, (later, later))
+
+    result = await conn.retrieve(RetrievalRequest(query="kombucha", top_k=5))
+
+    assert [Path(ev.uri).stem for ev in result.evidence] == ["Kombucha"]

@@ -28,15 +28,26 @@ def create_app(
     analyzer_client: CompletesText,
     synthesis_client: CompletesText,
     default_top_k: int = 5,
+    max_fused_items: int | None = None,
+    trace_view_token: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="CapRetrieve")
 
     app.state.registry = registry
+    # None disables GET /trace/view (see api/routes/trace.py)
+    app.state.trace_view_token = trace_view_token
     app.state.graph = build_graph(
-        registry, analyzer_client, synthesis_client, default_top_k=default_top_k
+        registry,
+        analyzer_client,
+        synthesis_client,
+        default_top_k=default_top_k,
+        max_fused_items=max_fused_items,
     )
     app.state.trace_graph = build_trace_graph(
-        registry, analyzer_client, default_top_k=default_top_k
+        registry,
+        analyzer_client,
+        default_top_k=default_top_k,
+        max_fused_items=max_fused_items,
     )
 
     app.include_router(query_route.router)
