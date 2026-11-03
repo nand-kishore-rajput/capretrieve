@@ -128,7 +128,8 @@ class N {
   out() {
     if (!this.tagName) return this._t;
     const t = this.tagName.toLowerCase();
-    return "<" + t + (this.className ? "." + this.className : "") + ">" +
+    return "<" + t + (this.className ? "." + this.className : "") +
+           (this.href ? " href=" + this.href : "") + ">" +
            this.childNodes.map(c => c.out()).join("") + "</" + t + ">";
   }
 }
@@ -137,7 +138,7 @@ global.document = { createElement: t => new N(t), createTextNode: t => new N(nul
 """
 
 
-def _render_markdown_with_node(text: str) -> str:
+def _render_markdown_with_node(text: str, allowed_urls: list[str] | None = None) -> str:
     import shutil
     import subprocess
 
@@ -151,7 +152,11 @@ def _render_markdown_with_node(text: str) -> str:
     program = (
         _NODE_HARNESS
         + script
-        + "\nprocess.stdout.write(renderMarkdown(" + json.dumps(text) + ").out());\n"
+        + "\nprocess.stdout.write(renderMarkdown("
+        + json.dumps(text)
+        + ", new Set("
+        + json.dumps(allowed_urls or [])
+        + ")).out());\n"
     )
     done = subprocess.run(
         [node, "-e", program], capture_output=True, text=True, timeout=20
@@ -185,3 +190,19 @@ def test_answer_markdown_leaves_plain_brackets_alone():
 
     assert "See [2] and [note] for more." in html
     assert "cite" not in html
+
+
+def test_answer_link_to_retrieved_evidence_is_clickable_and_shows_its_host():
+    url = "https://example.org/eu-ai-act"
+    html = _render_markdown_with_node(f"See [the update]({url}).", allowed_urls=[url])
+
+    assert f"<a href={url}>the update (example.org)</a>" in html
+
+
+def test_answer_link_not_in_evidence_is_plain_text_with_full_url():
+    """A prompt-injected link must not hide where it goes behind its text."""
+    url = "https://attacker.example/c?d=private-note-text"
+    html = _render_markdown_with_node(f"See [your notes]({url}).", allowed_urls=[])
+
+    assert "<a" not in html
+    assert f"your notes ({url})" in html

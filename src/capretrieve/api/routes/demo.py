@@ -201,6 +201,12 @@ function renderDecisions(plan) {
 // lists, **bold**, *italic*, `code`, [text](https://...) links, and citations
 // like [1: /path/to/file.md] or [obsidian: Note.md; chroma: doc.md], which are
 // shortened to the file name with the full reference on hover.
+//
+// Links: the answer is model output that can be steered by retrieved web
+// content (prompt injection), so a link could carry private data in its URL
+// behind innocent text. A link is only clickable when its URL is one of the
+// evidence URIs actually retrieved for this answer, and its hostname is always
+// shown. Any other link is rendered as plain text with its full URL visible.
 
 const INLINE = new RegExp(
   [
@@ -244,7 +250,7 @@ function citation(content) {
   return el("span", { className: "cite", text: labels.join("; "), title: content });
 }
 
-function appendInline(parent, text) {
+function appendInline(parent, text, allowedUrls) {
   // A fresh regex per call: appendInline recurses for bold/italic, and a
   // shared global regex would have its lastIndex reset by the inner call.
   const re = new RegExp(INLINE.source, "g");
@@ -256,16 +262,13 @@ function appendInline(parent, text) {
     if (m[1]) {
       node = el("code", { text: m[1].slice(1, -1) });
     } else if (m[2]) {
-      node = el("a", { text: m[2] });
-      node.href = m[3];
-      node.target = "_blank";
-      node.rel = "noopener noreferrer";
+      node = renderLink(m[2], m[3], allowedUrls);
     } else if (m[4] || m[5]) {
       node = document.createElement("strong");
-      appendInline(node, m[4] || m[5]);
+      appendInline(node, m[4] || m[5], allowedUrls);
     } else if (m[6] || m[7]) {
       node = document.createElement("em");
-      appendInline(node, m[6] || m[7]);
+      appendInline(node, m[6] || m[7], allowedUrls);
     } else {
       node = citation(m[8]) || document.createTextNode(m[0]);
     }
@@ -275,7 +278,18 @@ function appendInline(parent, text) {
   if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
 }
 
-function renderMarkdown(text) {
+function renderLink(label, url, allowedUrls) {
+  if (allowedUrls && allowedUrls.has(url)) {
+    const a = el("a", { text: label + " (" + shortRef(url) + ")", title: url });
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    return a;
+  }
+  return document.createTextNode(label + " (" + url + ")");
+}
+
+function renderMarkdown(text, allowedUrls) {
   const root = el("div", { className: "answer" });
   let para = null;
   let list = null;
@@ -292,7 +306,7 @@ function renderMarkdown(text) {
     if (heading) {
       closeBlocks();
       const h = el(heading[1].length <= 2 ? "h3" : "h4");
-      appendInline(h, heading[2]);
+      appendInline(h, heading[2], allowedUrls);
       root.appendChild(h);
     } else if (bullet || numbered) {
       const tag = bullet ? "ul" : "ol";
@@ -302,13 +316,13 @@ function renderMarkdown(text) {
         root.appendChild(list);
       }
       const li = el("li");
-      appendInline(li, (bullet || numbered)[1]);
+      appendInline(li, (bullet || numbered)[1], allowedUrls);
       list.appendChild(li);
     } else if (list && /^\s{2,}\S/.test(raw)) {
       // indented continuation of the previous list item
       const li = list.lastChild;
       li.appendChild(document.createTextNode(" "));
-      appendInline(li, line.trim());
+      appendInline(li, line.trim(), allowedUrls);
     } else {
       list = null;
       if (!para) {
@@ -317,15 +331,18 @@ function renderMarkdown(text) {
       } else {
         para.appendChild(el("br"));
       }
-      appendInline(para, line.trim());
+      appendInline(para, line.trim(), allowedUrls);
     }
   }
   if (!root.childNodes.length) root.appendChild(el("p", { text: "(empty)" }));
   return root;
 }
 
-function renderAnswer(answer) {
-  return [el("h2", { text: "3. Answer" }), renderMarkdown(answer || "")];
+function renderAnswer(answer, evidence) {
+  const allowedUrls = new Set(
+    (evidence || []).map((e) => e.uri).filter((u) => typeof u === "string" && /^https?:\/\//.test(u))
+  );
+  return [el("h2", { text: "3. Answer" }), renderMarkdown(answer || "", allowedUrls)];
 }
 
 function renderEvidence(evidence) {
@@ -370,7 +387,7 @@ function render(question, data, seconds) {
     el("p", { className: "muted", text: "Completed in " + seconds + "s" }),
     ...renderRequirements(trace.requirements),
     ...renderDecisions(trace.execution_plan),
-    ...renderAnswer(data.answer),
+    ...renderAnswer(data.answer, data.evidence),
     ...renderEvidence(data.evidence),
     ...renderExecution(trace.execution),
   ];
