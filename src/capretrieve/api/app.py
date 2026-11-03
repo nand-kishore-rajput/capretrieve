@@ -15,6 +15,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from capretrieve.api.routes import connectors as connectors_route
+from capretrieve.api.routes import demo as demo_route
 from capretrieve.api.routes import health as health_route
 from capretrieve.api.routes import query as query_route
 from capretrieve.api.routes import trace as trace_route
@@ -54,5 +55,6 @@ def create_app(
     app.include_router(connectors_route.router)
     app.include_router(health_route.router)
     app.include_router(trace_route.router)
+    app.include_router(demo_route.router)
 
     return app
