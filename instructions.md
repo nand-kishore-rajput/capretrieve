@@ -102,6 +102,7 @@ This gives you FastAPI's interactive UI where you can try all three endpoints di
 | Endpoint      | Method | Purpose                                                           |
 | ------------- | ------ | ----------------------------------------------------------------- |
 | `/docs`       | GET    | Interactive API explorer (Swagger UI)                             |
+| `/demo`       | GET    | Demo page: type a question, see decisions, trace and answer       |
 | `/query`      | POST   | Submit a query — returns answer, evidence, and full routing trace |
 | `/trace/view` | GET    | Same as `/query`, rendered as an HTML page (needs `token`)        |
 | `/connectors` | GET    | View all registered connector manifests                           |
