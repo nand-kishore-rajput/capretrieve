@@ -92,7 +92,7 @@ methods. Nothing in the planner changes. See
 | -------------------------------------------------------- | ---------------------------------------------------------------------- |
 | [docs/positioning.md](docs/positioning.md)               | The problem, how this differs from LLM tool calling, evaluation results |
 | [docs/architecture.md](docs/architecture.md)             | The pipeline, components, invariants and failure handling              |
-| [docs/capretrieve-query-flow.pdf](docs/capretrieve-query-flow.pdf) | Illustrated walkthrough of one query through every stage (10 pages)    |
+| [docs/capretrieve-query-flow.pdf](docs/capretrieve-query-flow.pdf) | Illustrated walkthrough of one query through every stage              |
 | [docs/manifest-schema.md](docs/manifest-schema.md)       | Every manifest and requirement field, and the exact planner rules       |
 | [docs/adding-a-connector.md](docs/adding-a-connector.md) | Step-by-step guide to plugging in a new source                         |
 | [docs/evaluation.md](docs/evaluation.md)                 | Scenarios, baselines, and how to run and replay the evaluation          |
