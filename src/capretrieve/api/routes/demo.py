@@ -60,8 +60,14 @@ DEMO_HTML = """<!DOCTYPE html>
   .selected { background: #dafbe1; color: #1a7f37; }
   .blocked { background: #ffebe9; color: #cf222e; }
   .skipped { background: #fff8c5; color: #9a6700; }
-  .answer { background: #f6f8fa; padding: 1rem; border-radius: 6px; white-space: pre-wrap;
-            line-height: 1.5; }
+  .answer { background: #f6f8fa; padding: 0.4rem 1.1rem; border-radius: 6px; line-height: 1.55; }
+  .answer p { margin: 0.7rem 0; }
+  .answer ul, .answer ol { margin: 0.5rem 0; padding-left: 1.4rem; }
+  .answer li { margin: 0.3rem 0; }
+  .answer h3, .answer h4 { margin: 1rem 0 0.4rem; font-size: 1rem; }
+  .answer code { background: #eaeef2; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
+  .cite { display: inline-block; background: #ddf4ff; color: #0969da; border-radius: 4px;
+          padding: 0 0.35rem; font-size: 0.78em; font-weight: 600; white-space: nowrap; cursor: help; }
   .error { background: #ffebe9; color: #cf222e; padding: 0.8rem; border-radius: 6px; white-space: pre-wrap; }
   .muted { color: #59636e; font-size: 0.85rem; }
   .question { font-size: 1.05rem; font-weight: 600; }
@@ -189,8 +195,137 @@ function renderDecisions(plan) {
   return [el("h2", { text: "2. Source decisions" }), table(["Source", "Decision", "Score", "Reason"], rows)];
 }
 
+// --- Minimal Markdown for LLM answers ---------------------------------------
+// Builds DOM nodes from text; nothing is ever parsed as HTML. Supports the
+// subset synthesis models actually produce: paragraphs, #-headings, - and 1.
+// lists, **bold**, *italic*, `code`, [text](https://...) links, and citations
+// like [1: /path/to/file.md] or [obsidian: Note.md; chroma: doc.md], which are
+// shortened to the file name with the full reference on hover.
+
+const INLINE = new RegExp(
+  [
+    "(`[^`\\n]+`)",                                  // 1 code
+    "\\[([^\\[\\]\\n]+)\\]\\((https?://[^\\s)]+)\\)", // 2,3 link
+    "\\*\\*(.+?)\\*\\*",                             // 4 bold
+    "__(.+?)__",                                     // 5 bold
+    "(?<![\\w*])\\*(?![\\s*])(.+?)\\*(?!\\w)",       // 6 italic
+    "(?<!\\w)_(?![\\s_])(.+?)_(?!\\w)",              // 7 italic
+    "\\[([^\\[\\]\\n]{1,800})\\]",                   // 8 bracket (maybe a citation)
+  ].join("|"),
+  "g"
+);
+
+function shortRef(ref) {
+  ref = ref.trim();
+  if (/^https?:\/\//.test(ref)) {
+    try { return new URL(ref).hostname; } catch (e) { return ref; }
+  }
+  const parts = ref.split(/[\/\\]/);
+  return parts[parts.length - 1] || ref;
+}
+
+function citation(content) {
+  // Only treat [...] as a citation if it points at a path or URL.
+  if (!/[\/\\]|https?:/.test(content)) return null;
+  const labels = content.split(/;\s*/).map((part) => {
+    let label = "";
+    let ref = part;
+    const uri = part.match(/uri=(.+)$/);
+    if (uri) {
+      ref = uri[1];
+      const sid = part.match(/source_id=([^\s,]+)/);
+      label = sid ? sid[1] : "";
+    } else {
+      const m = part.match(/^\s*([^:\/\\]{1,40}):\s*(.+)$/);
+      if (m) { label = m[1].trim(); ref = m[2]; }
+    }
+    return (label ? label + " · " : "") + shortRef(ref);
+  });
+  return el("span", { className: "cite", text: labels.join("; "), title: content });
+}
+
+function appendInline(parent, text) {
+  // A fresh regex per call: appendInline recurses for bold/italic, and a
+  // shared global regex would have its lastIndex reset by the inner call.
+  const re = new RegExp(INLINE.source, "g");
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    let node;
+    if (m[1]) {
+      node = el("code", { text: m[1].slice(1, -1) });
+    } else if (m[2]) {
+      node = el("a", { text: m[2] });
+      node.href = m[3];
+      node.target = "_blank";
+      node.rel = "noopener noreferrer";
+    } else if (m[4] || m[5]) {
+      node = document.createElement("strong");
+      appendInline(node, m[4] || m[5]);
+    } else if (m[6] || m[7]) {
+      node = document.createElement("em");
+      appendInline(node, m[6] || m[7]);
+    } else {
+      node = citation(m[8]) || document.createTextNode(m[0]);
+    }
+    parent.appendChild(node);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function renderMarkdown(text) {
+  const root = el("div", { className: "answer" });
+  let para = null;
+  let list = null;
+  const closeBlocks = () => { para = null; list = null; };
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { closeBlocks(); continue; }
+
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+
+    if (heading) {
+      closeBlocks();
+      const h = el(heading[1].length <= 2 ? "h3" : "h4");
+      appendInline(h, heading[2]);
+      root.appendChild(h);
+    } else if (bullet || numbered) {
+      const tag = bullet ? "ul" : "ol";
+      if (!list || list.tagName.toLowerCase() !== tag) {
+        para = null;
+        list = el(tag);
+        root.appendChild(list);
+      }
+      const li = el("li");
+      appendInline(li, (bullet || numbered)[1]);
+      list.appendChild(li);
+    } else if (list && /^\s{2,}\S/.test(raw)) {
+      // indented continuation of the previous list item
+      const li = list.lastChild;
+      li.appendChild(document.createTextNode(" "));
+      appendInline(li, line.trim());
+    } else {
+      list = null;
+      if (!para) {
+        para = el("p");
+        root.appendChild(para);
+      } else {
+        para.appendChild(el("br"));
+      }
+      appendInline(para, line.trim());
+    }
+  }
+  if (!root.childNodes.length) root.appendChild(el("p", { text: "(empty)" }));
+  return root;
+}
+
 function renderAnswer(answer) {
-  return [el("h2", { text: "3. Answer" }), el("div", { className: "answer", text: answer || "(empty)" })];
+  return [el("h2", { text: "3. Answer" }), renderMarkdown(answer || "")];
 }
 
 function renderEvidence(evidence) {

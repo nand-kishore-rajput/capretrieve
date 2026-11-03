@@ -114,3 +114,74 @@ def test_demo_script_never_injects_html():
     assert "innerHTML" not in DEMO_JS
     assert "outerHTML" not in DEMO_JS
     assert "insertAdjacentHTML" not in DEMO_JS
+
+
+# A tiny DOM stand-in, so the page's Markdown renderer can run under Node.
+_NODE_HARNESS = r"""
+class N {
+  constructor(tag, text) { this.tagName = tag ? tag.toUpperCase() : null; this._t = text;
+                           this.childNodes = []; this.className = ""; this.title = ""; }
+  appendChild(c) { this.childNodes.push(c); return c; }
+  get lastChild() { return this.childNodes[this.childNodes.length - 1]; }
+  set textContent(v) { this.childNodes = [new N(null, String(v))]; }
+  get textContent() { return this.tagName ? this.childNodes.map(c => c.textContent).join("") : this._t; }
+  out() {
+    if (!this.tagName) return this._t;
+    const t = this.tagName.toLowerCase();
+    return "<" + t + (this.className ? "." + this.className : "") + ">" +
+           this.childNodes.map(c => c.out()).join("") + "</" + t + ">";
+  }
+}
+global.document = { createElement: t => new N(t), createTextNode: t => new N(null, t),
+                    getElementById: () => new N("div"), querySelectorAll: () => [] };
+"""
+
+
+def _render_markdown_with_node(text: str) -> str:
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    # Load the script without its DOM wiring, then call renderMarkdown.
+    script = DEMO_JS.split("form.addEventListener")[0]
+    program = (
+        _NODE_HARNESS
+        + script
+        + "\nprocess.stdout.write(renderMarkdown(" + json.dumps(text) + ").out());\n"
+    )
+    done = subprocess.run(
+        [node, "-e", program], capture_output=True, text=True, timeout=20
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def test_answer_markdown_is_rendered_as_formatting():
+    text = (
+        "Intro with a cite [1: /a/b/corpus/type2_diabetes_hba1c.md].\n\n"
+        "**Plan**\n"
+        "- **Lifestyle:** exercise [obsidian: /v/Blood Test Results.md]\n"
+        "- second\n\n"
+        "## Next\n"
+        "1. call *the* doctor, see `notes`\n"
+    )
+    html = _render_markdown_with_node(text)
+
+    assert "**" not in html
+    assert "<strong>Plan</strong>" in html
+    assert "<ul><li><strong>Lifestyle:</strong> exercise" in html
+    assert "<h3>Next</h3>" in html
+    assert "<ol><li>call <em>the</em> doctor, see <code>notes</code></li></ol>" in html
+    assert '<span.cite>1 · type2_diabetes_hba1c.md</span>' in html
+    assert '<span.cite>obsidian · Blood Test Results.md</span>' in html
+
+
+def test_answer_markdown_leaves_plain_brackets_alone():
+    html = _render_markdown_with_node("See [2] and [note] for more.")
+
+    assert "See [2] and [note] for more." in html
+    assert "cite" not in html
