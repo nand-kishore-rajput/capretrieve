@@ -140,7 +140,7 @@ podman-compose exec capretrieve bash
 pytest tests/ -v
 ```
 
-Expected result: **292 passed, 2 skipped** (S2 and S3 are intentionally deferred to Phase 6).
+Expected result: everything passes, with **2 skipped** (scenarios S2 and S3 are known gaps, see `docs/future-work.md`).
 
 ---
 
@@ -171,7 +171,7 @@ podman-compose up -d
 ```
 
 **OpenRouter returns 404 or "not a valid model ID":**
-Check `ANALYZER_MODEL` and `SYNTHESIS_MODEL` in your `.env` against the current model list at https://openrouter.ai/anthropic. The default is `anthropic/claude-sonnet-5`.
+Check `ANALYZER_MODEL` and `SYNTHESIS_MODEL` in your `.env` against the current model list at https://openrouter.ai/models. The default is `openrouter/free`, which routes each call to a random free model; pin a model (e.g. `anthropic/claude-haiku-5.5`) for consistent results.
 
 **Empty answer / null content from OpenRouter:**
-The model exhausted `max_tokens` on internal reasoning before producing output. The error log will say `EmptyCompletionError` with `finish_reason=length`. Raise `MAX_TOKENS` in `.env` or switch to a non-reasoning mod
+The model exhausted `max_tokens` on internal reasoning before producing output. The error log will say `EmptyCompletionError` with `finish_reason=length`. Raise `LLM_MAX_TOKENS` in `.env` or switch to a non-reasoning model.

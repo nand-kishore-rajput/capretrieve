@@ -4,6 +4,10 @@ A guide to every code file in the project, organized by how data flows through
 the system rather than alphabetically. Read top to bottom to follow the path a
 query takes from HTTP request to synthesized answer.
 
+For the design-level view, see [docs/architecture.md](docs/architecture.md). The
+routing rules are in [docs/manifest-schema.md](docs/manifest-schema.md), and adding
+a source is covered in [docs/adding-a-connector.md](docs/adding-a-connector.md).
+
 ---
 
 ## The one-paragraph mental model
@@ -58,12 +62,12 @@ never imports these — it only sees their manifests.
 | File                               | Purpose                                                                                                                                                                                                                                                                                                                                                              |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `connectors/obsidian/vault.py`     | Loads an Obsidian vault via LlamaIndex's `ObsidianReader`, then adds what that reader _doesn't_ do: parses YAML frontmatter and inline `#tags`. Produces `Note` objects with wikilinks/backlinks/tags/content.                                                                                                                                                       |
-| `connectors/obsidian/traversal.py` | `expand_neighbourhood()` — from a seed note, walks outward via wikilinks + backlinks up to a given depth. This is the graph-traversal retrieval mode. (Note: treats the link graph as _undirected_.)                                                                                                                                                                 |
-| `connectors/obsidian/connector.py` | **`ObsidianConnector`** — implements `Connector`. Two internal modes behind one interface: keyword/tag search (default), or seed-note graph traversal (when `filters={"seed_note": ...}` is present). Includes `_resolve_seed_note()` for fuzzy/case-insensitive matching of an LLM-extracted entity name to a real note title. Declares `paradigm=graph_traversal`. |
+| `connectors/obsidian/traversal.py` | `expand_neighbourhood()` — from a seed note, walks outward via wikilinks + backlinks up to a given depth, breadth-first: the seed first, then each hop sorted by name, so a `top_k` cut is deterministic and keeps the seed. (Treats the link graph as _undirected_.) |
+| `connectors/obsidian/connector.py` | **`ObsidianConnector`** — implements `Connector`. Two internal modes behind one interface: keyword/tag search (default; whole-word matching with stopwords removed), or seed-note graph traversal (when `filters={"seed_note": ...}` is present). `_resolve_seed_note()` matches an LLM-extracted entity name to a real note title case-insensitively; an unresolved seed falls back to keyword search. Reloads the vault when a note is edited, added or deleted, matching its `freshness: live` manifest. Declares `paradigm=graph_traversal`. |
 | `connectors/chroma/embeddings.py`  | **`HashingEmbeddingFunction`** — a deterministic, offline, dependency-free bag-of-words embedding. Used instead of ChromaDB's default (which downloads a model over the network). Swappable for a real embedding model without touching anything else.                                                                                                               |
 | `connectors/chroma/ingest.py`      | `ingest_corpus()` — loads `fixtures/data/corpus/*.md` into a Chroma collection. Client is injectable (real `PersistentClient` in prod, `EphemeralClient` in tests — the latter avoids a known ChromaDB multi-instance hang). Disables ChromaDB telemetry.                                                                                                            |
 | `connectors/chroma/connector.py`   | **`ChromaConnector`** — implements `Connector`. Dense semantic similarity search over the ingested collection. Converts Chroma's distance to a similarity-style score. Declares `paradigm=dense_semantic`.                                                                                                                                                           |
-| `connectors/web/connector.py`      | **`WebSearchConnector`** — implements `Connector` over the Tavily search API. The only connector that leaves the local environment (`query_leaks_externally=true`), which is what the S1 privacy block keys on. Tavily client is injectable for testing. Declares `paradigm=keyword`.                                                                                |
+| `connectors/web/connector.py`      | **`WebSearchConnector`** — implements `Connector` over the Tavily search API, called in a worker thread so it doesn't block the event loop. The only connector that leaves the local environment (`query_leaks_externally=true`), which is what the privacy block keys on. Tavily client is injectable for testing. Declares `paradigm=keyword`. |
 
 ---
 
@@ -91,7 +95,7 @@ manifests as plain data. This is enforced by architecture tests. This is where
 
 | File                | Purpose                                                                                                                                                                                                                                                                                                                                                                     |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `llm/client.py`     | **`OpenRouterClient`** — thin wrapper over OpenRouter's chat-completions endpoint via `httpx`. Sends a default `max_tokens` (Anthropic requires it). Raises `OpenRouterError` with the full response body on HTTP errors, and `EmptyCompletionError` (with a reasoning-token hint) when a 200 response has null content — both hard-learned from real end-to-end debugging. |
+| `llm/client.py`     | **`LLMClient`** — provider-agnostic wrapper over any OpenAI-compatible chat-completions endpoint (OpenRouter, Groq, a local server) via `httpx`. Sends a default `max_tokens`. Raises `LLMError` with the full response body on HTTP errors or a response with no choices, and `EmptyCompletionError` (with a reasoning-token hint) when a 200 response has null content. |
 | `llm/structured.py` | `get_structured_output()` — takes any client, a prompt, and a Pydantic model; requests JSON, parses/validates it, and retries with a corrective follow-up on failure. Provider-agnostic (defines the `CompletesText` protocol). This is how the analyzer reliably gets a valid `QueryRequirements` back.                                                                    |
 
 ---
@@ -104,13 +108,13 @@ connectors are _allowed_ to meet the planner's output.
 
 | File                        | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `graph/state.py`            | **`GraphState`** — the shared state flowing through the pipeline (query, requirements, plan, raw evidence, fused evidence, answer). Uses a LangGraph `TypedDict` with an `operator.add` reducer on `raw_evidence` so parallel branches _accumulate_ rather than overwrite. Also **`RetrieveOneInput`** (the per-branch payload).                                                                                                              |
-| `graph/build.py`            | `build_graph()` — assembles the pipeline: `analyze → plan → fan_out(retrieve) → fuse → synthesize`. Wires the injected registry and LLM clients into each node.                                                                                                                                                                                                                                                                               |
-| `graph/nodes/analyze.py`    | Adapter → `planner.analyzer.analyze()`. Query in, `requirements` out.                                                                                                                                                                                                                                                                                                                                                                         |
+| `graph/state.py`            | **`GraphState`** — the shared state flowing through the pipeline (query, requirements, plan, raw evidence, retrieval errors, fused evidence, answer). Uses a LangGraph `TypedDict` with `operator.add` reducers on `raw_evidence` and `retrieval_errors` so parallel branches _accumulate_ rather than overwrite. Also **`RetrieveOneInput`** (the per-branch payload). |
+| `graph/build.py`            | `build_graph()` — assembles the pipeline: `analyze → plan → fan_out(retrieve) → fuse → synthesize`. `build_trace_graph()` is the same pipeline stopping after `fuse` (one LLM call), used by `POST /trace`. Wires the injected registry and LLM clients into each node. |
+| `graph/nodes/analyze.py`    | Adapter → `planner.analyzer.analyze()`, run in a worker thread. Query in, `requirements` out. |
 | `graph/nodes/plan.py`       | Adapter → `planner.plan()`. **The wiring boundary**: it's allowed to read the registry's manifests and hand them to the (connector-blind) planner, keeping the planner's import isolation intact.                                                                                                                                                                                                                                             |
-| `graph/nodes/retrieve.py`   | Two pieces: the **fan-out router** (empty plan → skip to fuse; otherwise one parallel `Send` per selected connector) and **`retrieve_one`** (looks up the actual connector and calls `retrieve()`). Also `_build_retrieval_filters()` — translates a relational query's `seed_entity` into the `{"seed_note": ..., "depth": 1}` filter that triggers Obsidian's graph-traversal mode. This is the only node that touches connectors directly. |
+| `graph/nodes/retrieve.py`   | Two pieces: the **fan-out router** (empty plan → skip to fuse; otherwise one parallel `Send` per selected connector) and **`retrieve_one`** (looks up the actual connector and calls `retrieve()`). If a connector raises, the error is recorded in `retrieval_errors` and the query continues with the other sources. Also `_build_retrieval_filters()` — translates a relational query's `seed_entity` into the `{"seed_note": ..., "depth": 1}` filter that triggers Obsidian's graph-traversal mode. This is the only node that touches connectors directly. |
 | `graph/nodes/fuse.py`       | Adapter → `fusion.merge.fuse()`.                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `graph/nodes/synthesize.py` | Adapter → `generation.synthesize.synthesize()`.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `graph/nodes/synthesize.py` | Adapter → `generation.synthesize.synthesize()`, run in a worker thread. |
 
 ---
 
@@ -131,7 +135,7 @@ by an architecture test — fusion ranks, it doesn't reason.
 
 | File                              | Purpose                                                                                                                                                                                                               |
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `generation/synthesize.py`        | `synthesize()` — one LLM call that turns fused evidence + the query into a final answer with inline `[source_id: uri]` citations per claim. The _only_ place an LLM call happens after retrieval. Client is injected. |
+| `generation/synthesize.py`        | `synthesize()` — one LLM call that turns fused evidence + the query into a final answer with inline `[source_id: uri]` citations per claim. With no evidence it returns a fixed message without calling the LLM. The _only_ place an LLM call happens after retrieval. Client is injected. |
 | `generation/prompts/synthesis.md` | The synthesis prompt. Instructs the model to answer only from provided evidence, cite each claim's source, and say so plainly if evidence is insufficient.                                                            |
 
 ---
@@ -140,9 +144,9 @@ by an architecture test — fusion ranks, it doesn't reason.
 
 | File                | Purpose                                                                                                                                                                                                                                             |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trace/models.py`   | **`PlanTrace`** + `ConnectorExecutionRecord` — the full decision path for one query: requirements → every candidate's decision (+block reason) → per-connector execution counts → fused evidence → answer. "The code isn't the demo; the trace is." |
+| `trace/models.py`   | **`PlanTrace`** + `ConnectorExecutionRecord` — the full decision path for one query: requirements → every candidate's decision (+block reason) → per-connector execution counts and errors → fused evidence → answer. "The code isn't the demo; the trace is." |
 | `trace/recorder.py` | `build_trace()` — assembles a `PlanTrace` from a completed `GraphState`. (Includes the `answer or ""` guard for a null LLM completion.)                                                                                                             |
-| `trace/render.py`   | Renders a `PlanTrace` as JSON or as dependency-free, HTML-escaped HTML — a human-readable "why did it do that" view, no frontend framework.                                                                                                         |
+| `trace/render.py`   | Renders a `PlanTrace` as JSON or as dependency-free, HTML-escaped HTML for `GET /trace/view` — a human-readable "why did it do that" view, no frontend framework. |
 
 ---
 
@@ -154,7 +158,9 @@ by an architecture test — fusion ranks, it doesn't reason.
 | `api/routes/query.py`      | `POST /query` — runs the graph on the query, builds the trace, returns answer + evidence + trace.                                           |
 | `api/routes/connectors.py` | `GET /connectors` — returns the raw manifests (what each source declares it can do).                                                        |
 | `api/routes/health.py`     | `GET /health` — aggregates every connector's `health()` into one response.                                                                  |
-| `api/app.py`               | `create_app()` — the FastAPI app factory. Takes an already-built registry + graph, so it's testable with fakes. Stores them on `app.state`. |
+| `api/routes/trace.py`      | `POST /trace` — routing trace only, no synthesis. `GET /trace/view` — the full trace as an HTML page, guarded by `TRACE_VIEW_TOKEN` because a GET that spends credits can be triggered by any web page. |
+| `api/routes/demo.py`       | `GET /demo` + `/demo.js` — browser page with a question box and examples; calls `POST /query` and renders requirements, decisions, answer, evidence and execution. Strict CSP, text-only rendering. |
+| `api/app.py`               | `create_app()` — the FastAPI app factory. Takes an already-built registry + LLM clients (plus `max_fused_items` and `trace_view_token`), so it's testable with fakes. Stores the graphs on `app.state`. |
 | `api/main.py`              | The uvicorn entrypoint (`uvicorn capretrieve.api.main:app`). Calls `bootstrap.build_default_app()`.                                         |
 
 ---
@@ -163,8 +169,8 @@ by an architecture test — fusion ranks, it doesn't reason.
 
 | File           | Purpose                                                                                                                                                                                                                                                                                                                                                             |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings.py`  | **`Settings`** — all runtime config from environment variables: OpenRouter key + model slugs, Tavily key, data directories, query defaults. `require_openrouter_api_key()` fails fast if the one required secret is missing.                                                                                                                                        |
-| `bootstrap.py` | The real assembly layer. `build_default_registry()` constructs the three real connectors from settings; `build_default_graph()` / `build_default_app()` wire them to real `OpenRouterClient`s. This is where the three external integrations (Tavily + two OpenRouter calls) are finally instantiated for real. Chroma client is injectable so this stays testable. |
+| `settings.py`  | **`Settings`** — all runtime config from environment variables: LLM endpoint, key and model ids, Tavily key, trace-view token, data directories, query defaults. An empty value counts as unset (`_env()`). `require_llm_api_key()` fails fast if the one required secret is missing. |
+| `bootstrap.py` | The real assembly layer. `build_default_registry()` constructs the three real connectors from settings and ingests the corpus; `build_default_graph()` / `build_default_app()` wire them to real `LLMClient`s. This is where the external integrations (Tavily + two LLM calls) are instantiated for real. Chroma client is injectable so this stays testable. New connectors are registered here (see `docs/adding-a-connector.md`). |
 
 ---
 
@@ -173,25 +179,46 @@ by an architecture test — fusion ranks, it doesn't reason.
 | File                                                   | Purpose                                                                                                                                                                                    |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `configs/connectors/{obsidian,chroma,web_search}.yaml` | The three connector manifests **as data**. Editing a field here changes routing behavior with zero code changes — the property the whole design rests on.                                  |
-| `fixtures/scenarios.yaml`                              | The five adversarial scenarios (S1–S5) as ground truth: each query's `must_include` / `must_exclude` with machine-checkable exclusion reasons. S1/S4/S5 active; S2/S3 deferred to Phase 6. |
-| `fixtures/data/vault/*.md`                             | Sample Obsidian vault (4 linked notes) the Obsidian connector runs against in dev/test.                                                                                                    |
-| `fixtures/data/corpus/*.md`                            | Sample document corpus the Chroma connector ingests in dev/test.                                                                                                                           |
+| `fixtures/scenarios.yaml`                              | The ten adversarial scenarios as ground truth: each query's `must_include` / `must_include_any` / `must_exclude` with machine-checkable exclusion reasons. S1/S4/S5 active, S6–S10 held out (written after the prompt and weights were frozen), S2/S3 deferred. |
+| `fixtures/data/vault/*.md`                             | Demo Obsidian vault: 30 linked notes for a fictional user (work, health, AI study notes, private life admin), covering every scenario. |
+| `fixtures/data/corpus/*.md`                            | Demo document corpus: 20 reference articles the Chroma connector ingests (RAG, retrieval, health, employment law, agile). |
 | `pyproject.toml`                                       | Package metadata, dependencies, pytest config.                                                                                                                                             |
 | `Dockerfile` / `docker-compose.yml`                    | Container build (editable install) and run (bind-mount + port mapping).                                                                                                                    |
 | `.env.example`                                         | Template for the environment variables `settings.py` reads.                                                                                                                                |
 
 ---
 
-## The five architectural invariants (enforced by CI tests)
+## 13. Evaluation (`src/capretrieve/evaluation/`)
+
+| File                                   | Purpose                                                                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `evaluation/runner.py`                 | Runs scenarios × routers × N runs and appends one record per run to `reports/runs/<batch>.jsonl`. Resumable.                                 |
+| `evaluation/capretrieve_router.py`     | CapRetrieve wrapped as a router: analyze → plan only, same client and manifests as production.                                               |
+| `evaluation/baselines/keyword_router.py` | TF-IDF match of the query against each `scope` string, same selection threshold. No LLM.                                                   |
+| `evaluation/baselines/tool_description_router.py` | An LLM picks sources from names + `scope` text, with and without the privacy rule in the prompt.                                  |
+| `evaluation/records.py`                | The log schema. Stores the full analyzer output so runs can be replayed offline.                                                             |
+| `evaluation/compare.py`                | Scores a batch against `scenarios.yaml` and writes the summary tables. No LLM calls.                                                         |
+| `evaluation/replay.py`                 | Re-plans logged runs with one manifest or requirement field masked, and sweeps the selection threshold. No LLM calls.                       |
+
+See [docs/evaluation.md](docs/evaluation.md) for how to run it.
+
+---
+
+## The architectural invariants
 
 These are the guardrails that keep the project from quietly degrading into
-"RouterQueryEngine with extra steps." Each has a test in `tests/architecture/`:
+"RouterQueryEngine with extra steps." The first five have a test in
+`tests/architecture/`:
 
 1. The planner never imports `connectors/` or `registry/`.
 2. `planner/models/` imports only `manifest/` + stdlib.
 3. The analyzer prompt contains no connector names.
 4. The `scope` field is never read by planner code.
 5. Fusion never calls an LLM.
+6. Editing a manifest YAML changes the plan with no code change
+   (`tests/scenarios/test_manifest_sensitivity.py`).
+7. Graph nodes stay thin; checked in review (`test_nodes_are_thin.py` is
+   still empty).
 
 ---
 
