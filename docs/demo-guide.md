@@ -3,6 +3,10 @@
 How to show CapRetrieve to a team in about ten minutes, using the `/demo`
 page and the demo data in `fixtures/data/`.
 
+[demo-recording.mp4](demo-recording.mp4) is a 2-minute recording of the page
+answering the linked-notes and health-data questions, as a fallback if a live
+run fails.
+
 ## Before the meeting
 
 1. **Pin the models.** `openrouter/free` routes each call to a random free

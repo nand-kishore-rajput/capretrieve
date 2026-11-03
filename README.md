@@ -47,6 +47,9 @@ out of the box: a 30-note linked Obsidian vault for a fictional user and a
 
 ## What you can look at
 
+A 2-minute screen recording of the `/demo` page answering example
+questions: [docs/demo-recording.mp4](docs/demo-recording.mp4).
+
 | Endpoint      | What it shows                                                                                      |
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `/demo`       | Question box with examples. Shows the analyzer's reading, each source's decision, answer, evidence |
